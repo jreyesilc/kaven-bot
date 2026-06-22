@@ -9,7 +9,10 @@ app.use(cors());
 
 console.log("🚀 Starting server...");
 
+//////////////////////////////////////////////////////
 // ✅ OPENAI SEGURO
+//////////////////////////////////////////////////////
+
 let openai = null;
 
 try {
@@ -26,7 +29,10 @@ try {
   openai = null;
 }
 
+//////////////////////////////////////////////////////
 // ✅ ZOHO TOKEN
+//////////////////////////////////////////////////////
+
 async function refreshZohoToken() {
   try {
     const res = await axios.post(
@@ -41,19 +47,27 @@ async function refreshZohoToken() {
         }
       }
     );
+
     return res.data.access_token;
+
   } catch (err) {
     console.log("🔥 Zoho token error:", err.message);
     return null;
   }
 }
 
-// ✅ CREAR LEAD
+//////////////////////////////////////////////////////
+// ✅ CREAR LEAD EN ZOHO
+//////////////////////////////////////////////////////
+
 async function crearLead(name, phone, message) {
   try {
     const token = await refreshZohoToken();
 
-    if (!token) return;
+    if (!token) {
+      console.log("❌ No Zoho token");
+      return;
+    }
 
     await axios.post(
       "https://www.zohoapis.com/crm/v2/Leads",
@@ -80,7 +94,10 @@ async function crearLead(name, phone, message) {
   }
 }
 
-// ✅ ENDPOINT
+//////////////////////////////////////////////////////
+// ✅ ENDPOINT PRINCIPAL
+//////////////////////////////////////////////////////
+
 app.post("/chat", async (req, res) => {
 
   console.log("✅ Request received:", req.body);
@@ -93,7 +110,12 @@ app.post("/chat", async (req, res) => {
 
     console.log("🔑 OPENAI:", process.env.OPENAI_KEY ? "OK" : "MISSING");
 
+    //////////////////////////////////////////////////////
+    // ✅ GPT RESPONSE
+    //////////////////////////////////////////////////////
     if (!openai) {
+
+      console.log("⚠️ Using fallback (no OpenAI)");
 
       reply = "Hi 👋 we offer 100% custom sports uniforms 🔥 How many uniforms do you need?";
 
@@ -101,12 +123,14 @@ app.post("/chat", async (req, res) => {
 
       try {
 
+        console.log("🚀 Calling OpenAI...");
+
         const response = await openai.chat.completions.create({
           model: "gpt-4.1-mini",
           messages: [
             {
               role: "system",
-              content: "You are a sales assistant for custom sports uniforms."
+              content: "You are a sales assistant for custom sports uniforms. Reply in same language as user."
             },
             {
               role: "user",
@@ -115,35 +139,57 @@ app.post("/chat", async (req, res) => {
           ]
         });
 
+        console.log("✅ OpenAI responded");
+
         reply = response.choices[0].message.content;
 
       } catch (err) {
+
         console.log("🔥 GPT error:", err.message);
 
-        reply = "Hi 👋 we offer custom sports uniforms 🔥 How many do you need?";
+        reply = "Hi 👋 we offer custom uniforms 🔥 How many do you need?";
       }
     }
 
+    //////////////////////////////////////////////////////
+    // ✅ DETECCIÓN INTELIGENTE DE LEADS
+    //////////////////////////////////////////////////////
     if (
-  message &&
-  /uniform|price|quote|order|custom|cotizar|precio|uniforme/i.test(message)
-) {
+      message &&
+      /uniform|price|quote|order|custom|cotizar|precio|uniforme/i.test(message)
+    ) {
+      try {
+        console.log("📊 Sending lead to Zoho...");
+        await crearLead(name, phone, message);
+        console.log("✅ Lead created");
+      } catch (zohoError) {
+        console.log("🔥 Zoho error:", zohoError.message);
+      }
+    }
 
+    //////////////////////////////////////////////////////
+    // ✅ RESPUESTA FINAL
+    //////////////////////////////////////////////////////
     reply += "\n\n👉 https://kavensports.com";
+
+    console.log("✅ Sending response");
 
     res.json({ reply });
 
   } catch (err) {
+
     console.log("🔥 GENERAL ERROR:", err.message);
 
     res.json({
-      reply: "Something went wrong 👋 but we can help. How many uniforms do you need?"
+      reply: "Hi 👋 something went wrong but we can still help you. How many uniforms do you need?"
     });
   }
-
 });
 
-// ✅ PUERTO CORRECTO PARA RENDER
+//////////////////////////////////////////////////////
+// ✅ SERVER
+//////////////////////////////////////////////////////
+
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
