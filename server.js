@@ -1,4 +1,5 @@
 app.post("/chat", async (req, res) => {
+  console.log("✅ Request received:", req.body);
   const { message, name, phone } = req.body;
 
   let reply = "";
