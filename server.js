@@ -124,7 +124,7 @@ app.post("/chat", async (req, res) => {
       }
     }
 
-    if (message && message.toLowerCase().includes("uniform")) {
+    if (message &&/uniform|price|quote|order|custom|cotizar|precio|uniforme/i.test(message)) 
       await crearLead(name, phone, message);
     }
 
