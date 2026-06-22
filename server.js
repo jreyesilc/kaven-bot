@@ -124,9 +124,10 @@ app.post("/chat", async (req, res) => {
       }
     }
 
-    if (message &&/uniform|price|quote|order|custom|cotizar|precio|uniforme/i.test(message)) 
-      await crearLead(name, phone, message);
-    }
+    if (
+  message &&
+  /uniform|price|quote|order|custom|cotizar|precio|uniforme/i.test(message)
+) {
 
     reply += "\n\n👉 https://kavensports.com";
 
