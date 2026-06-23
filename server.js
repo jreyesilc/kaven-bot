@@ -84,12 +84,18 @@ function detectBuyingSignals(payload = {}) {
   const signalPatterns = {
     pricing: [
       /\bprecio\b/i,
+      /\bprice\b/i,
+      /\bprices\b/i,
+      /\bpricing\b/i,
+      /per\s+unit/i,
+      /per\s+piece/i,
       /cuanto\s+cuesta/i,
-      /cost(o|ar)/i,
+      /cost(o|ar|s)?/i,
       /how\s+much/i,
-      /pricing/i,
       /quote/i,
-      /cotiz(ar|acion)/i
+      /cotiz(ar|acion)/i,
+      /\bbudget\b/i,
+      /\$\s*\d/i
     ],
     quantity: [
       /\bcuantos\b/i,
@@ -97,7 +103,12 @@ function detectBuyingSignals(payload = {}) {
       /minimum\s+order/i,
       /minimo\s+de\s+(pedido|compra)/i,
       /moq/i,
-      /how\s+many/i
+      /how\s+many/i,
+      /\bunits?\b/i,
+      /\bpieces?\b/i,
+      /\bbulk\b/i,
+      /\bdozen\b/i,
+      /\d{1,6}\s*(custom\s+)?(uniforms?|jerseys?|shirts?|kits?|pieces?|units?|sets?|pcs?|players?|team)/i
     ],
     customization: [
       /\bdiseno\b/i,
