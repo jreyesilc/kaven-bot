@@ -367,7 +367,7 @@ app.get("/lead-fields", async (req, res) => {
 app.post("/lead", async (req, res) => {
   console.log("📥 /lead request:", JSON.stringify(req.body));
   try {
-    let { name, email, phone, signals, message } = req.body || {};
+    let { name, email, phone, signals, message, raw_message } = req.body || {};
 
     // signals puede llegar como array, como string CSV o como string tipo "pricing,quantity,"
     if (typeof signals === "string") {
@@ -375,6 +375,15 @@ app.post("/lead", async (req, res) => {
     }
     if (!Array.isArray(signals)) {
       signals = [];
+    }
+
+    // RESPALDO ROBUSTO: si no llegaron señales desde la sesion de SalesIQ
+    // pero si tenemos el mensaje original del visitante, las detectamos aqui
+    // reutilizando el mismo motor de deteccion del endpoint /chat.
+    if (signals.length === 0 && raw_message) {
+      const detected = detectBuyingSignals({ message: raw_message });
+      signals = detected.categories || [];
+      console.log("🔁 /lead fallback signal detection:", signals);
     }
 
     const result = await crearLeadCompleto({ name, email, phone, signals, message });
