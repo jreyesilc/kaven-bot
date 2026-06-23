@@ -279,34 +279,60 @@ async function crearLeadCompleto({ name, email, phone, signals, message }) {
     record.Se_ales_de_Compra = labels;
   }
 
-  try {
-    const resp = await axios.post(
-      "https://www.zohoapis.com/crm/v2/Leads",
-      { data: [record] },
-      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-    );
+  // Reintento automatico: el layout "Sports Leads" tiene varios campos
+  // obligatorios. Si la API responde MANDATORY_NOT_FOUND, agregamos ese
+  // campo con un valor placeholder y reintentamos (max 15 intentos).
+  const filledMandatory = [];
+  for (let attempt = 0; attempt < 15; attempt++) {
+    try {
+      const resp = await axios.post(
+        "https://www.zohoapis.com/crm/v2/Leads",
+        { data: [record] },
+        { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+      );
 
-    const detail =
-      resp.data &&
-      Array.isArray(resp.data.data) &&
-      resp.data.data[0] ? resp.data.data[0] : null;
+      const detail =
+        resp.data &&
+        Array.isArray(resp.data.data) &&
+        resp.data.data[0] ? resp.data.data[0] : null;
 
-    if (detail && detail.code === "SUCCESS") {
-      return {
-        ok: true,
-        id: detail.details ? detail.details.id : "",
-        signals: labels
-      };
+      if (detail && detail.code === "SUCCESS") {
+        return {
+          ok: true,
+          id: detail.details ? detail.details.id : "",
+          signals: labels,
+          auto_filled: filledMandatory
+        };
+      }
+
+      // Si es MANDATORY_NOT_FOUND, rellenar y reintentar
+      if (detail && detail.code === "MANDATORY_NOT_FOUND" && detail.details && detail.details.api_name) {
+        const missing = detail.details.api_name;
+        if (!record.hasOwnProperty(missing)) {
+          record[missing] = "Por confirmar";
+          filledMandatory.push(missing);
+          continue;
+        }
+      }
+      return { ok: false, error: JSON.stringify(resp.data) };
+    } catch (err) {
+      const data = err.response && err.response.data ? err.response.data : null;
+      const detail =
+        data && Array.isArray(data.data) && data.data[0] ? data.data[0] : null;
+      if (detail && detail.code === "MANDATORY_NOT_FOUND" && detail.details && detail.details.api_name) {
+        const missing = detail.details.api_name;
+        if (!record.hasOwnProperty(missing)) {
+          record[missing] = "Por confirmar";
+          filledMandatory.push(missing);
+          continue;
+        }
+      }
+      const apiErr = data ? JSON.stringify(data) : err.message;
+      console.log("🔥 crearLeadCompleto error:", apiErr);
+      return { ok: false, error: apiErr };
     }
-    return { ok: false, error: JSON.stringify(resp.data) };
-  } catch (err) {
-    const apiErr =
-      err.response && err.response.data
-        ? JSON.stringify(err.response.data)
-        : err.message;
-    console.log("🔥 crearLeadCompleto error:", apiErr);
-    return { ok: false, error: apiErr };
   }
+  return { ok: false, error: "max_retries_mandatory_fields", auto_filled: filledMandatory };
 }
 
 //////////////////////////////////////////////////////
