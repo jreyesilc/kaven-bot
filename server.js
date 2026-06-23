@@ -252,8 +252,19 @@ async function crearLeadCompleto({ name, email, phone, signals, message }) {
     }
   });
 
+  // El layout "Sports Leads" exige First_Name. Dividimos el nombre completo.
+  const fullName = (name || "Unknown").toString().trim();
+  let firstName = fullName;
+  let lastName = fullName;
+  const spaceIdx = fullName.indexOf(" ");
+  if (spaceIdx > 0) {
+    firstName = fullName.substring(0, spaceIdx).trim();
+    lastName = fullName.substring(spaceIdx + 1).trim();
+  }
+
   const record = {
-    Last_Name: name || "Unknown",
+    First_Name: firstName,
+    Last_Name: lastName || firstName,
     Email: email || "",
     Phone: phone || "",
     Company: "Kaven Sports - Web Chat",
