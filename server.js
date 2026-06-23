@@ -186,6 +186,75 @@ async function refreshZohoToken() {
 }
 
 //////////////////////////////////////////////////////
+// ✅ BUSCAR LEAD EXISTENTE POR EMAIL (anti-duplicados)
+//////////////////////////////////////////////////////
+
+// Busca un Lead existente en Zoho CRM por email exacto.
+// Devuelve el primer registro encontrado o null.
+// IMPORTANTE: si la busqueda falla por cualquier razon, devolvemos null
+// para NO bloquear la creacion del lead (preferimos un posible duplicado
+// antes que perder un lead).
+async function buscarLeadPorEmail(token, email) {
+  const cleanEmail = (email || "").toString().trim();
+  if (!cleanEmail) {
+    console.log("🔎 buscarLeadPorEmail: sin email, se omite dedup");
+    return null;
+  }
+
+  try {
+    const resp = await axios.get(
+      "https://www.zohoapis.com/crm/v2/Leads/search",
+      {
+        params: { criteria: `(Email:equals:${cleanEmail})` },
+        headers: { Authorization: `Zoho-oauthtoken ${token}` }
+      }
+    );
+
+    // Zoho devuelve 204 (sin contenido) cuando no hay resultados
+    if (resp.status === 204 || !resp.data || !Array.isArray(resp.data.data)) {
+      console.log(`🔎 buscarLeadPorEmail: sin lead previo para ${cleanEmail}`);
+      return null;
+    }
+
+    if (resp.data.data.length > 0) {
+      const found = resp.data.data[0];
+      console.log(`♻️ buscarLeadPorEmail: lead existente ${found.id} para ${cleanEmail}`);
+      return found;
+    }
+
+    return null;
+  } catch (err) {
+    const status = err.response ? err.response.status : null;
+    if (status === 204) {
+      console.log(`🔎 buscarLeadPorEmail: 204 sin lead previo para ${cleanEmail}`);
+      return null;
+    }
+    const apiErr = err.response && err.response.data ? JSON.stringify(err.response.data) : err.message;
+    console.log("⚠️ buscarLeadPorEmail error (se continua con creacion):", apiErr);
+    return null;
+  }
+}
+
+// Combina las señales existentes en CRM con las nuevas (sin duplicar)
+function mergeSignals(existingValue, newLabels) {
+  const merged = [];
+  const pushUnique = (v) => {
+    const val = (v || "").toString().trim();
+    if (val && !merged.includes(val)) merged.push(val);
+  };
+
+  // existingValue puede ser array (multiselect) o string
+  if (Array.isArray(existingValue)) {
+    existingValue.forEach(pushUnique);
+  } else if (typeof existingValue === "string" && existingValue.trim()) {
+    existingValue.split(/[;,]/).forEach(pushUnique);
+  }
+
+  (newLabels || []).forEach(pushUnique);
+  return merged;
+}
+
+//////////////////////////////////////////////////////
 // ✅ CREAR LEAD EN ZOHO
 //////////////////////////////////////////////////////
 
@@ -237,20 +306,82 @@ const SIGNAL_LABELS = {
 
 const SPORTS_LEADS_LAYOUT_ID = "5941168000003464001";
 
+// Actualiza el campo de señales (y opcionalmente telefono/descripcion) de un
+// lead ya existente, en lugar de crear un duplicado.
+async function actualizarLeadExistente(token, leadId, mergedLabels, phone, message) {
+  try {
+    const record = { id: leadId };
+    if (mergedLabels && mergedLabels.length > 0) {
+      record.Se_ales_de_Compra = mergedLabels;
+    }
+    if (phone) record.Phone = phone;
+    if (message) record.Description = message;
+
+    const resp = await axios.put(
+      "https://www.zohoapis.com/crm/v2/Leads",
+      { data: [record] },
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+    );
+
+    const detail =
+      resp.data && Array.isArray(resp.data.data) && resp.data.data[0]
+        ? resp.data.data[0]
+        : null;
+
+    if (detail && detail.code === "SUCCESS") {
+      console.log(`✅ Lead existente ${leadId} actualizado con señales:`, mergedLabels);
+      return { ok: true };
+    }
+    console.log("⚠️ actualizarLeadExistente respuesta inesperada:", JSON.stringify(resp.data));
+    return { ok: false, error: JSON.stringify(resp.data) };
+  } catch (err) {
+    const apiErr = err.response && err.response.data ? JSON.stringify(err.response.data) : err.message;
+    console.log("🔥 actualizarLeadExistente error:", apiErr);
+    return { ok: false, error: apiErr };
+  }
+}
+
 async function crearLeadCompleto({ name, email, phone, signals, message }) {
   const token = await refreshZohoToken();
   if (!token) {
+    console.log("❌ crearLeadCompleto: no se obtuvo token de Zoho");
     return { ok: false, error: "no_token" };
   }
 
-  // Construir etiquetas de señales válidas
+  // Construir etiquetas de señales válidas (mapeo backend -> picklist CRM)
   const labels = [];
+  const unknownSignals = [];
   (signals || []).forEach((s) => {
     const key = (s || "").toString().trim().toLowerCase();
-    if (SIGNAL_LABELS[key] && !labels.includes(SIGNAL_LABELS[key])) {
-      labels.push(SIGNAL_LABELS[key]);
+    if (SIGNAL_LABELS[key]) {
+      if (!labels.includes(SIGNAL_LABELS[key])) labels.push(SIGNAL_LABELS[key]);
+    } else if (key) {
+      unknownSignals.push(key);
     }
   });
+  console.log("🏷️ Señales recibidas:", signals, "=> etiquetas CRM:", labels);
+  if (unknownSignals.length > 0) {
+    console.log("⚠️ Señales no reconocidas (ignoradas para picklist):", unknownSignals);
+  }
+
+  //////////////////////////////////////////////////////
+  // 🛡️ DEDUPLICACION POR EMAIL (backend)
+  // Antes de crear, buscamos si ya existe un lead con ese email.
+  // Si existe: actualizamos sus señales (merge) en lugar de duplicar.
+  //////////////////////////////////////////////////////
+  const existing = await buscarLeadPorEmail(token, email);
+  if (existing && existing.id) {
+    const mergedLabels = mergeSignals(existing.Se_ales_de_Compra, labels);
+    const upd = await actualizarLeadExistente(token, existing.id, mergedLabels, phone, message);
+    return {
+      ok: true,
+      id: existing.id,
+      duplicate: true,
+      updated: upd.ok,
+      signals: mergedLabels,
+      update_error: upd.ok ? undefined : upd.error
+    };
+  }
 
   // El layout "Sports Leads" exige First_Name. Dividimos el nombre completo.
   const fullName = (name || "Unknown").toString().trim();
@@ -282,7 +413,43 @@ async function crearLeadCompleto({ name, email, phone, signals, message }) {
   // Reintento automatico: el layout "Sports Leads" tiene varios campos
   // obligatorios. Si la API responde MANDATORY_NOT_FOUND, agregamos ese
   // campo con un valor placeholder y reintentamos (max 15 intentos).
+  // Ademas, si Se_ales_de_Compra devuelve INVALID_DATA (valor que no
+  // coincide con el picklist), movemos las señales a Description y
+  // reintentamos para NO perder el lead.
   const filledMandatory = [];
+  let signalsFieldDropped = false;
+
+  // Procesa un "detail" de error de Zoho. Devuelve true si ajusto el
+  // record y conviene reintentar; false si no es recuperable.
+  const handleRetryableError = (detail) => {
+    if (!detail || !detail.details) return false;
+
+    if (detail.code === "MANDATORY_NOT_FOUND" && detail.details.api_name) {
+      const missing = detail.details.api_name;
+      if (!record.hasOwnProperty(missing)) {
+        record[missing] = "Por confirmar";
+        filledMandatory.push(missing);
+        console.log("➕ Campo obligatorio autocompletado:", missing);
+        return true;
+      }
+    }
+
+    if (detail.code === "INVALID_DATA" && detail.details.api_name === "Se_ales_de_Compra") {
+      if (record.Se_ales_de_Compra && !signalsFieldDropped) {
+        const sigText = labels.join("; ");
+        record.Description =
+          (record.Description ? record.Description + " | " : "") +
+          "Señales de compra detectadas: " + sigText;
+        delete record.Se_ales_de_Compra;
+        signalsFieldDropped = true;
+        console.log("⚠️ Se_ales_de_Compra INVALID_DATA -> señales movidas a Description, reintentando");
+        return true;
+      }
+    }
+
+    return false;
+  };
+
   for (let attempt = 0; attempt < 15; attempt++) {
     try {
       const resp = await axios.post(
@@ -297,41 +464,35 @@ async function crearLeadCompleto({ name, email, phone, signals, message }) {
         resp.data.data[0] ? resp.data.data[0] : null;
 
       if (detail && detail.code === "SUCCESS") {
+        const newId = detail.details ? detail.details.id : "";
+        console.log(`✅ Lead creado en Zoho (id=${newId}) señales=${JSON.stringify(labels)} dropped=${signalsFieldDropped}`);
         return {
           ok: true,
-          id: detail.details ? detail.details.id : "",
+          id: newId,
+          duplicate: false,
           signals: labels,
+          signals_in_description: signalsFieldDropped,
           auto_filled: filledMandatory
         };
       }
 
-      // Si es MANDATORY_NOT_FOUND, rellenar y reintentar
-      if (detail && detail.code === "MANDATORY_NOT_FOUND" && detail.details && detail.details.api_name) {
-        const missing = detail.details.api_name;
-        if (!record.hasOwnProperty(missing)) {
-          record[missing] = "Por confirmar";
-          filledMandatory.push(missing);
-          continue;
-        }
-      }
+      if (handleRetryableError(detail)) continue;
+
+      console.log("🔥 crearLeadCompleto respuesta no exitosa:", JSON.stringify(resp.data));
       return { ok: false, error: JSON.stringify(resp.data) };
     } catch (err) {
       const data = err.response && err.response.data ? err.response.data : null;
       const detail =
         data && Array.isArray(data.data) && data.data[0] ? data.data[0] : null;
-      if (detail && detail.code === "MANDATORY_NOT_FOUND" && detail.details && detail.details.api_name) {
-        const missing = detail.details.api_name;
-        if (!record.hasOwnProperty(missing)) {
-          record[missing] = "Por confirmar";
-          filledMandatory.push(missing);
-          continue;
-        }
-      }
+
+      if (handleRetryableError(detail)) continue;
+
       const apiErr = data ? JSON.stringify(data) : err.message;
       console.log("🔥 crearLeadCompleto error:", apiErr);
       return { ok: false, error: apiErr };
     }
   }
+  console.log("🔥 crearLeadCompleto: max reintentos alcanzado", filledMandatory);
   return { ok: false, error: "max_retries_mandatory_fields", auto_filled: filledMandatory };
 }
 
@@ -394,7 +555,9 @@ app.post("/lead", async (req, res) => {
       console.log("🔁 /lead fallback signal detection:", signals);
     }
 
+    console.log("🧾 /lead señales finales a procesar:", signals, "email:", email);
     const result = await crearLeadCompleto({ name, email, phone, signals, message });
+    console.log("📤 /lead resultado:", JSON.stringify(result));
     return res.json(result);
   } catch (err) {
     console.log("🔥 /lead error:", err.message);
