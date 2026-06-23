@@ -367,7 +367,15 @@ app.get("/lead-fields", async (req, res) => {
 app.post("/lead", async (req, res) => {
   console.log("📥 /lead request:", JSON.stringify(req.body));
   try {
-    let { name, email, phone, signals, message, raw_message } = req.body || {};
+    let { name, email, phone, signals, buying_signals, message, raw_message } = req.body || {};
+
+    // Compatibilidad con SalesIQ Context Handler v8/v9:
+    // v8 envio el campo como buying_signals, mientras que el backend
+    // originalmente esperaba signals. Aceptamos ambos para evitar que
+    // el campo de CRM quede vacio aunque el handler use el nombre nuevo.
+    if ((!signals || (Array.isArray(signals) && signals.length === 0)) && buying_signals) {
+      signals = buying_signals;
+    }
 
     // signals puede llegar como array, como string CSV o como string tipo "pricing,quantity,"
     if (typeof signals === "string") {
