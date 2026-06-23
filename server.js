@@ -30,6 +30,125 @@ try {
 }
 
 //////////////////////////////////////////////////////
+// ✅ HELPERS DE CONTEXTO Y CUALIFICACIÓN
+//////////////////////////////////////////////////////
+
+function normalizeText(value = "") {
+  return String(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getConversationTexts(payload = {}) {
+  const texts = [];
+
+  if (typeof payload.message === "string") {
+    texts.push(payload.message);
+  }
+
+  if (typeof payload.conversation === "string") {
+    texts.push(payload.conversation);
+  }
+
+  if (Array.isArray(payload.history)) {
+    payload.history.forEach((item) => {
+      if (typeof item === "string") {
+        texts.push(item);
+      } else if (item && typeof item === "object") {
+        if (typeof item.content === "string") texts.push(item.content);
+        if (typeof item.message === "string") texts.push(item.message);
+        if (typeof item.text === "string") texts.push(item.text);
+      }
+    });
+  }
+
+  if (Array.isArray(payload.messages)) {
+    payload.messages.forEach((item) => {
+      if (typeof item === "string") {
+        texts.push(item);
+      } else if (item && typeof item === "object") {
+        if (typeof item.content === "string") texts.push(item.content);
+        if (typeof item.message === "string") texts.push(item.message);
+        if (typeof item.text === "string") texts.push(item.text);
+      }
+    });
+  }
+
+  return texts.filter(Boolean);
+}
+
+function detectBuyingSignals(payload = {}) {
+  const signalPatterns = {
+    pricing: [
+      /\bprecio\b/i,
+      /cuanto\s+cuesta/i,
+      /cost(o|ar)/i,
+      /how\s+much/i,
+      /pricing/i,
+      /quote/i,
+      /cotiz(ar|acion)/i
+    ],
+    quantity: [
+      /\bcuantos\b/i,
+      /\bcantidad\b/i,
+      /minimum\s+order/i,
+      /minimo\s+de\s+(pedido|compra)/i,
+      /moq/i,
+      /how\s+many/i
+    ],
+    customization: [
+      /\bdiseno\b/i,
+      /personaliz(ar|ado)/i,
+      /customi[sz]e/i,
+      /custom\b/i,
+      /logo/i,
+      /colores?/i,
+      /nombre\s+en\s+el\s+uniforme/i
+    ],
+    timeline: [
+      /cuanto\s+tiempo/i,
+      /\bentrega\b/i,
+      /delivery/i,
+      /when\b/i,
+      /lead\s*time/i,
+      /tiempo\s+de\s+produccion/i
+    ],
+    direct_interest: [
+      /quiero\s+cotizar/i,
+      /me\s+interesa/i,
+      /i\s*(am|'m)\s+interested/i,
+      /want\s+a\s+quote/i,
+      /how\s+to\s+order/i,
+      /como\s+ordeno/i,
+      /quiero\s+comprar/i,
+      /listo\s+para\s+comprar/i
+    ]
+  };
+
+  const conversationTexts = getConversationTexts(payload);
+  const normalizedConversation = normalizeText(conversationTexts.join(" \n "));
+
+  const categories = [];
+  for (const [category, patterns] of Object.entries(signalPatterns)) {
+    if (patterns.some((regex) => regex.test(normalizedConversation))) {
+      categories.push(category);
+    }
+  }
+
+  const collectContact = categories.length > 0;
+
+  return {
+    collectContact,
+    categories,
+    signalCount: categories.length,
+    analyzedText: normalizedConversation
+  };
+}
+
+//////////////////////////////////////////////////////
 // ✅ ZOHO TOKEN
 //////////////////////////////////////////////////////
 
@@ -49,7 +168,6 @@ async function refreshZohoToken() {
     );
 
     return res.data.access_token;
-
   } catch (err) {
     console.log("🔥 Zoho token error:", err.message);
     return null;
@@ -88,7 +206,6 @@ async function crearLead(name, phone, message) {
     );
 
     console.log("✅ Lead created in Zoho");
-
   } catch (err) {
     console.log("🔥 Zoho error:", err.message);
   }
@@ -99,68 +216,63 @@ async function crearLead(name, phone, message) {
 //////////////////////////////////////////////////////
 
 app.post("/chat", async (req, res) => {
-
   console.log("✅ Request received:", req.body);
 
   const { message, name, phone } = req.body;
 
-  let reply = "";
+  let responseText = "";
 
   try {
-
     console.log("🔑 OPENAI:", process.env.OPENAI_KEY ? "OK" : "MISSING");
 
+    const leadSignals = detectBuyingSignals(req.body);
+    console.log("🧠 Lead signal detection:", leadSignals);
+
     //////////////////////////////////////////////////////
-    // ✅ GPT RESPONSE
+    // ✅ GPT RESPONSE (CON CONTEXTO)
     //////////////////////////////////////////////////////
     if (!openai) {
-
       console.log("⚠️ Using fallback (no OpenAI)");
-
-      reply = "Hi 👋 we offer 100% custom sports uniforms 🔥 How many uniforms do you need?";
-
+      responseText = "Hi 👋 we offer 100% custom sports uniforms 🔥 How many uniforms do you need?";
     } else {
-
       try {
-
         console.log("🚀 Calling OpenAI...");
+
+        const conversationContext = getConversationTexts(req.body)
+          .slice(-8)
+          .join("\n");
 
         const response = await openai.chat.completions.create({
           model: "gpt-4.1-mini",
           messages: [
             {
               role: "system",
-              content: "You are a sales assistant for custom sports uniforms. Reply in same language as user."
+              content:
+                "You are a sales assistant for custom sports uniforms. Reply in same language as user. Keep responses concise and practical."
             },
             {
               role: "user",
-              content: message || "hello"
+              content: conversationContext || message || "hello"
             }
           ]
         });
 
         console.log("✅ OpenAI responded");
 
-        reply = response.choices[0].message.content;
-
+        responseText = response.choices[0].message.content;
       } catch (err) {
-
         console.log("🔥 GPT error:", err.message);
-
-        reply = "Hi 👋 we offer custom uniforms 🔥 How many do you need?";
+        responseText = "Hi 👋 we offer custom uniforms 🔥 How many do you need?";
       }
     }
 
     //////////////////////////////////////////////////////
-    // ✅ DETECCIÓN INTELIGENTE DE LEADS
+    // ✅ ENVÍO A ZOHO SOLO SI YA TENEMOS CONTACTO
     //////////////////////////////////////////////////////
-    if (
-      message &&
-      /uniform|price|quote|order|custom|cotizar|precio|uniforme/i.test(message)
-    ) {
+    if (leadSignals.collectContact && (name || phone)) {
       try {
         console.log("📊 Sending lead to Zoho...");
-        await crearLead(name, phone, message);
+        await crearLead(name, phone, message || "Interested lead from chat");
         console.log("✅ Lead created");
       } catch (zohoError) {
         console.log("🔥 Zoho error:", zohoError.message);
@@ -170,18 +282,27 @@ app.post("/chat", async (req, res) => {
     //////////////////////////////////////////////////////
     // ✅ RESPUESTA FINAL
     //////////////////////////////////////////////////////
-    reply += "\n\n👉 https://kavensports.com";
+    responseText += "\n\n👉 https://kavensports.com";
 
     console.log("✅ Sending response");
 
-    res.json({ reply });
-
+    res.json({
+      response: responseText,
+      reply: responseText,
+      collect_contact: leadSignals.collectContact,
+      lead_signals: leadSignals.categories
+    });
   } catch (err) {
-
     console.log("🔥 GENERAL ERROR:", err.message);
 
+    const fallbackText =
+      "Hi 👋 something went wrong but we can still help you. How many uniforms do you need?";
+
     res.json({
-      reply: "Hi 👋 something went wrong but we can still help you. How many uniforms do you need?"
+      response: fallbackText,
+      reply: fallbackText,
+      collect_contact: false,
+      lead_signals: []
     });
   }
 });
