@@ -223,6 +223,105 @@ async function crearLead(name, phone, message) {
 }
 
 //////////////////////////////////////////////////////
+// ✅ CREAR LEAD COMPLETO (layout Sports Leads + señales)
+//////////////////////////////////////////////////////
+
+// Mapea claves del backend -> etiquetas EXACTAS del picklist en CRM
+const SIGNAL_LABELS = {
+  pricing: "Precio / Cotización (pricing)",
+  quantity: "Cantidad / Pedido mínimo (quantity)",
+  customization: "Personalización / Logo / Diseño (customization)",
+  timeline: "Tiempo de entrega (timeline)",
+  direct_interest: "Interés directo de compra (direct_interest)"
+};
+
+const SPORTS_LEADS_LAYOUT_ID = "5941168000003464001";
+
+async function crearLeadCompleto({ name, email, phone, signals, message }) {
+  const token = await refreshZohoToken();
+  if (!token) {
+    return { ok: false, error: "no_token" };
+  }
+
+  // Construir etiquetas de señales válidas
+  const labels = [];
+  (signals || []).forEach((s) => {
+    const key = (s || "").toString().trim().toLowerCase();
+    if (SIGNAL_LABELS[key] && !labels.includes(SIGNAL_LABELS[key])) {
+      labels.push(SIGNAL_LABELS[key]);
+    }
+  });
+
+  const record = {
+    Last_Name: name || "Unknown",
+    Email: email || "",
+    Phone: phone || "",
+    Company: "Kaven Sports - Web Chat",
+    Lead_Source: "Chatbot - SalesIQ",
+    Description: message || "Lead from Kaven Sports chatbot",
+    Layout: { id: SPORTS_LEADS_LAYOUT_ID }
+  };
+
+  if (labels.length > 0) {
+    record.Se_ales_de_Compra = labels;
+  }
+
+  try {
+    const resp = await axios.post(
+      "https://www.zohoapis.com/crm/v2/Leads",
+      { data: [record] },
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+    );
+
+    const detail =
+      resp.data &&
+      Array.isArray(resp.data.data) &&
+      resp.data.data[0] ? resp.data.data[0] : null;
+
+    if (detail && detail.code === "SUCCESS") {
+      return {
+        ok: true,
+        id: detail.details ? detail.details.id : "",
+        signals: labels
+      };
+    }
+    return { ok: false, error: JSON.stringify(resp.data) };
+  } catch (err) {
+    const apiErr =
+      err.response && err.response.data
+        ? JSON.stringify(err.response.data)
+        : err.message;
+    console.log("🔥 crearLeadCompleto error:", apiErr);
+    return { ok: false, error: apiErr };
+  }
+}
+
+//////////////////////////////////////////////////////
+// ✅ ENDPOINT /lead  (llamado por el Context Handler de SalesIQ)
+//////////////////////////////////////////////////////
+
+app.post("/lead", async (req, res) => {
+  console.log("📥 /lead request:", JSON.stringify(req.body));
+  try {
+    let { name, email, phone, signals, message } = req.body || {};
+
+    // signals puede llegar como array, como string CSV o como string tipo "pricing,quantity,"
+    if (typeof signals === "string") {
+      signals = signals.split(/[,\s]+/).filter(Boolean);
+    }
+    if (!Array.isArray(signals)) {
+      signals = [];
+    }
+
+    const result = await crearLeadCompleto({ name, email, phone, signals, message });
+    return res.json(result);
+  } catch (err) {
+    console.log("🔥 /lead error:", err.message);
+    return res.json({ ok: false, error: err.message });
+  }
+});
+
+//////////////////////////////////////////////////////
 // ✅ ENDPOINT PRINCIPAL
 //////////////////////////////////////////////////////
 
