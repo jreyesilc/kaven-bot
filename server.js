@@ -265,6 +265,7 @@ async function crearLeadCompleto({ name, email, phone, signals, message }) {
   const record = {
     First_Name: firstName,
     Last_Name: lastName || firstName,
+    Contact_Name: fullName,
     Email: email || "",
     Phone: phone || "",
     Company: "Kaven Sports - Web Chat",
@@ -310,6 +311,31 @@ async function crearLeadCompleto({ name, email, phone, signals, message }) {
 //////////////////////////////////////////////////////
 // ✅ ENDPOINT /lead  (llamado por el Context Handler de SalesIQ)
 //////////////////////////////////////////////////////
+
+// Endpoint de diagnostico: lista campos obligatorios del modulo Leads
+app.get("/lead-fields", async (req, res) => {
+  try {
+    const token = await refreshZohoToken();
+    if (!token) return res.json({ ok: false, error: "no_token" });
+    const resp = await axios.get(
+      "https://www.zohoapis.com/crm/v2/settings/fields?module=Leads",
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+    );
+    const fields = (resp.data.fields || [])
+      .filter((f) => f.system_mandatory || (f.required === true) || (f.custom_field && f.required))
+      .map((f) => ({
+        api_name: f.api_name,
+        field_label: f.field_label,
+        data_type: f.data_type,
+        system_mandatory: f.system_mandatory,
+        required: f.required
+      }));
+    return res.json({ ok: true, mandatory_fields: fields });
+  } catch (err) {
+    const apiErr = err.response && err.response.data ? err.response.data : err.message;
+    return res.json({ ok: false, error: apiErr });
+  }
+});
 
 app.post("/lead", async (req, res) => {
   console.log("📥 /lead request:", JSON.stringify(req.body));
