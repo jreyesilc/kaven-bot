@@ -271,6 +271,7 @@ async function crearLeadCompleto({ name, email, phone, signals, message }) {
     Company: "Kaven Sports - Web Chat",
     Lead_Source: "Chatbot - SalesIQ",
     Description: message || "Lead from Kaven Sports chatbot",
+    Team_Club_Name: "Por confirmar",
     Layout: { id: SPORTS_LEADS_LAYOUT_ID }
   };
 
