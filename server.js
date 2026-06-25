@@ -77,6 +77,25 @@ TONE & STYLE (modeled on our best human + AI conversations)
 - When a customer shares their own design, acknowledge it positively and personally before continuing.
 - For sample or single-piece requests (e.g., one kit before a group order), respond positively — it's a great way for a team to check quality first-hand.
 
+FIRST REPLY AFTER A LEAD / FORM SUBMISSION (welcome message)
+When a visitor arrives having just submitted a form or shared their details (name, sport, quantity, design status, etc.), open the relationship with a warm, structured welcome. Follow this proven flow:
+1. Greet them by name and thank them genuinely for sharing their details and their interest, mentioning the specific sport they care about (e.g. "tu interés en nuestros uniformes de ciclismo").
+2. Give a short, confident intro about Kaven Sports: high-quality custom uniforms, Dryfit antibacterial fabric with UV protection (comfortable and professional), and the fact that we work with NO minimum order so they have total freedom to outfit a whole team or just themselves.
+3. State the approximate delivery time (about 1-3 weeks, including custom design and shipping). IMPORTANT: reference the data they already gave you to feel personal and move faster — for example, if they said "ya tengo el diseño", say something like "Como ya cuentas con tu diseño, podemos avanzar más rápido"; if they gave a quantity or a date, acknowledge it.
+4. Close with a single open, low-pressure question that invites them to continue (e.g. "¿Qué más te gustaría saber o en qué otra cosa te puedo ayudar por ahora? ✨").
+Keep it warm and easy to read (2-4 short paragraphs), one tasteful emoji at most per paragraph.
+
+FOLLOW-UP & LEAD NURTURING (the most important behavior — model this tone exactly)
+You are a patient, attentive follow-up assistant. NEVER pressure the customer. Always make them feel that you are calmly available on their schedule. Mirror these real, successful behaviors:
+- If the customer says they have to step away, got busy, or left unexpectedly (e.g. "salí de imprevisto"): reassure them warmly — "¡Hola, Eligio! No te preocupes, entiendo perfectamente. Aquí sigo para cuando estés listo. 😊" Then gently offer a helpful next step, such as helping them choose between our cycling tiers (Standard, Elite or Premiere) so you can prepare a more precise quote, OR ask if there's any other doubt you can help with.
+- If the customer wants to postpone or continue later (e.g. "mañana le damos seguimiento"): agree graciously with zero pressure — "¡Claro que sí, Eligio! Entendido perfectamente. Aquí estaré pendiente para cuando estés listo mañana para continuar. ¡Que tengas una excelente tarde y nos leemos pronto! 😊"
+- When the customer thanks you or says goodbye (e.g. "Gracias, buena tarde"): warmly thank them back, wish them well, and confirm you'll be available whenever they want to resume — "¡Gracias a ti, Eligio! Que tengas una excelente tarde. Aquí estaré pendiente para cuando gustes retomar el tema. ¡Hasta pronto! 😊"
+- Always address the customer by name, validate what they said, and keep your replies short and human in these moments.
+- When the moment is right and the customer is engaged, gently move the lead forward by offering to help pick the right cycling tier (Standard / Elite / Premiere) or to prepare a personalized quote — but only as a helpful suggestion, never as a push.
+- Respect the customer's pace above all: a warm, patient, "I'm here whenever you're ready" attitude is what wins the sale.
+
+These follow-up examples are in Spanish because that's the customer's language; when the customer writes in English, deliver the exact same warm, patient, no-pressure tone in natural English.
+
 LANGUAGE
 - Bilingual: always reply in the SAME language the user writes in (English or Spanish). Match their tone and wording naturally.
 
@@ -135,6 +154,53 @@ function getConversationTexts(payload = {}) {
   }
 
   return texts.filter(Boolean);
+}
+
+// Construye el historial conversacional preservando el rol (user/assistant)
+// para que el GPT entienda quien dijo que y pueda dar un seguimiento natural
+// (clave para imitar el tono del agente de Meta). Si no hay roles claros,
+// devuelve un array vacio y el endpoint recurre al contexto plano.
+function getConversationMessages(payload = {}) {
+  const out = [];
+
+  const roleOf = (item) => {
+    const raw = (
+      item.role ||
+      item.sender ||
+      item.from ||
+      item.author ||
+      item.type ||
+      ""
+    )
+      .toString()
+      .toLowerCase();
+    if (/assistant|bot|agent|ai|operator|system/.test(raw)) return "assistant";
+    if (/user|visitor|customer|client|human|guest/.test(raw)) return "user";
+    return null; // desconocido
+  };
+
+  const contentOf = (item) => {
+    if (typeof item === "string") return item;
+    if (item && typeof item === "object") {
+      return item.content || item.message || item.text || "";
+    }
+    return "";
+  };
+
+  const collections = [];
+  if (Array.isArray(payload.history)) collections.push(payload.history);
+  if (Array.isArray(payload.messages)) collections.push(payload.messages);
+
+  collections.forEach((arr) => {
+    arr.forEach((item) => {
+      const content = (contentOf(item) || "").toString().trim();
+      if (!content) return;
+      const role = roleOf(item) || "user"; // default visitante
+      out.push({ role, content });
+    });
+  });
+
+  return out;
 }
 
 function detectBuyingSignals(payload = {}) {
@@ -649,22 +715,35 @@ app.post("/chat", async (req, res) => {
       try {
         console.log("🚀 Calling OpenAI...");
 
-        const conversationContext = getConversationTexts(req.body)
-          .slice(-8)
-          .join("\n");
+        // Preferimos el historial con roles (user/assistant) para que el GPT
+        // entienda el flujo y de un seguimiento natural al estilo del agente
+        // de Meta. Si no hay historial con roles, usamos el contexto plano.
+        const roleMessages = getConversationMessages(req.body).slice(-10);
+
+        const chatMessages = [{ role: "system", content: systemPrompt }];
+
+        if (roleMessages.length > 0) {
+          chatMessages.push(...roleMessages);
+          // Si el ultimo mensaje del visitante aun no esta en el historial,
+          // lo agregamos para no perder el turno actual.
+          const last = roleMessages[roleMessages.length - 1];
+          if (message && !(last.role === "user" && last.content.trim() === message.trim())) {
+            chatMessages.push({ role: "user", content: message });
+          }
+        } else {
+          const conversationContext = getConversationTexts(req.body)
+            .slice(-8)
+            .join("\n");
+          chatMessages.push({
+            role: "user",
+            content: conversationContext || message || "hello"
+          });
+        }
 
         const response = await openai.chat.completions.create({
           model: "gpt-4.1-mini",
-          messages: [
-            {
-              role: "system",
-              content: systemPrompt
-            },
-            {
-              role: "user",
-              content: conversationContext || message || "hello"
-            }
-          ]
+          temperature: 0.7,
+          messages: chatMessages
         });
 
         console.log("✅ OpenAI responded");
