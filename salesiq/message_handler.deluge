@@ -1,0 +1,121 @@
+response = Map();
+
+input = message.get("text");
+
+// ---------------------------------------------------------------
+// Productos del catalogo de ciclismo (botones "Get a quote")
+// ---------------------------------------------------------------
+allProducts = {"Standard Jersey","Elite Jersey","Premier Jersey","Standard Bib Short","Elite Bib Short","Premier Bib Short"};
+
+// Detectar el producto seleccionado en la landing.
+// La landing abre el chat con un primer mensaje: "Quiero cotizar: <producto>"
+clickedProduct = "";
+if(input != null && input.contains("Quiero cotizar:"))
+{
+	clickedProduct = input.getSuffix("Quiero cotizar:").trim();
+	// Guardar el producto en la sesion para el Context Handler
+	prodSess = Map();
+	prodSess.put("lead_clicked_product",clickedProduct);
+	zoho.salesiq.visitorsession.set("jreyesilcmx",prodSess);
+}
+
+// Estado de sesión
+captured = "false";
+sess = zoho.salesiq.visitorsession.get("jreyesilcmx","lead_captured");
+if(sess != null && sess.get("data") != null && sess.get("data").get("lead_captured") != null)
+{
+	captured = sess.get("data").get("lead_captured");
+}
+
+// Llamada al backend IA (Render)
+postBody = Map();
+postBody.put("message",input);
+headerMap = Map();
+headerMap.put("Content-Type","application/json");
+resp = invokeurl
+[
+	url :"https://kaven-bot.onrender.com/chat"
+	type :POST
+	parameters:postBody.toString()
+	headers:headerMap
+];
+
+respMap = resp.toMap();
+reply = respMap.get("response");
+if(reply == null || reply == "")
+{
+	reply = respMap.get("reply");
+}
+if(reply == null || reply == "")
+{
+	reply = "Gracias por escribir a Kaven Sports. Cuentame que deporte y cuantos uniformes necesitas y con gusto te ayudo con una cotizacion. https://kavensports.com";
+}
+
+// Bandera inteligente del backend
+collectContact = "false";
+collectFlag = respMap.get("collect_contact");
+if(collectFlag != null)
+{
+	collectContact = collectFlag.toString().toLowerCase();
+}
+
+// Si el visitante hizo clic en un boton de producto, forzamos la captura
+// del formulario de cotizacion aunque el backend no marque collect_contact.
+if(clickedProduct != "")
+{
+	collectContact = "true";
+}
+
+// Disparar formulario SOLO cuando corresponda
+// Orden: Q0 productos (cotizacion formal) + cuestionario del anuncio de ciclismo
+if(captured != "true" && collectContact == "true")
+{
+	response.put("action","context");
+	response.put("context_id","lead_details");
+
+	// ----- Q0: productos para la cotizacion formal -----
+	prodOptions = List();
+	introProd = "";
+	if(clickedProduct != "" && allProducts.contains(clickedProduct))
+	{
+		introProd = "Veo que te interesa el " + clickedProduct + ". Deseas agregar otros productos a tu cotizacion formal? Puedes elegir uno o varios.";
+		for each p in allProducts
+		{
+			if(p != clickedProduct)
+			{
+				prodOptions.add(p);
+			}
+		}
+		prodOptions.add("No, solo " + clickedProduct);
+	}
+	else
+	{
+		introProd = "Que productos quieres incluir en tu cotizacion formal? Puedes elegir uno o varios.";
+		for each p in allProducts
+		{
+			prodOptions.add(p);
+		}
+	}
+	q0 = {"name":"products","replies":{{"text":introProd}},"input":{"type":"multiselect","options":prodOptions}};
+
+	q1 = {"name":"quantity","replies":{{"text":"Para cuantas personas seria el pedido?"}},"input":{"type":"select","options":{"1 a 5","6 a 10","11 a 20","Mas de 20"}}};
+	q2 = {"name":"deadline","replies":{{"text":"Para cuando necesitas recibir tus uniformes?"}},"input":{"type":"select","options":{"Esta semana","Este mes","Proximo mes","Solo estoy buscando opciones"}}};
+	q3 = {"name":"design","replies":{{"text":"Ya tienes tu diseno o necesitas ayuda para crearlo?"}},"input":{"type":"select","options":{"Ya tengo el diseno","Necesito ayuda con el diseno","Aun no estoy seguro"}}};
+	q4 = {"name":"email","replies":{{"text":"Perfecto. A que correo electronico te enviamos tu cotizacion?","field_name":"siq_email"}},"input":{"type":"email","placeholder":"Escribe tu correo","error":{"Ingresa un correo valido"}}};
+	q5 = {"name":"name","replies":{{"text":"Cual es tu nombre completo?","field_name":"siq_name"}},"input":{"type":"name","placeholder":"Escribe tu nombre"}};
+	q6 = {"name":"phone","replies":{{"text":"Y tu numero de telefono para dar seguimiento?","field_name":"siq_phone"}},"input":{"type":"tel","placeholder":"Escribe tu telefono","error":{"Ingresa un telefono valido"}}};
+	questions = Collection();
+	questions.insert(q0);
+	questions.insert(q1);
+	questions.insert(q2);
+	questions.insert(q3);
+	questions.insert(q4);
+	questions.insert(q5);
+	questions.insert(q6);
+	response.put("questions",questions);
+	return response;
+}
+
+response.put("action","reply");
+response.put("replies",{reply});
+return response;

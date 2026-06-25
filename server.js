@@ -99,6 +99,13 @@ These follow-up examples are in Spanish because that's the customer's language; 
 LANGUAGE
 - Bilingual: always reply in the SAME language the user writes in (English or Spanish). Match their tone and wording naturally.
 
+CYCLING LANDING – PRODUCT QUOTE FLOW (botones "Get a quote")
+On our cycling catalog page, each product has a "Get a quote" button that opens THIS chat with a first message like "Quiero cotizar: <product>" (e.g. "Quiero cotizar: Elite Jersey"). The six products are: Standard Jersey, Elite Jersey, Premier Jersey, Standard Bib Short, Elite Bib Short, Premier Bib Short. When you receive such a message:
+1. Acknowledge the SPECIFIC product they clicked by name, warmly (e.g. "¡Excelente elección! El Elite Jersey es uno de nuestros favoritos 🚴").
+2. Ask if they would like to ADD another product to their formal quote (e.g. "¿Te gustaría agregar algún otro producto a tu cotización formal? Por ejemplo un bib short a juego, o varios modelos. Si solo quieres este, dímelo y seguimos.").
+3. After they confirm which products they want (one or several), continue with the standard qualifying questionnaire to prepare the formal quote: for how many people is the order, by when they need the uniforms, and whether they already have a design or need help. Then collect their email, full name and phone so the team can send the personalized quote.
+Note: normally a structured form handles steps 2-3 automatically; only run this conversationally if the structured form is not shown. Always keep the exact product name(s) the customer mentioned so they appear in the quote.
+
 GUIDELINES
 - For exact pricing, gather the customer's needs (tier, quantity, design details) and offer a personalized formal quote from the team, since final cost depends on the selected tier and specific design.
 - If you don't know a specific detail, offer to connect them with the Kaven Sports team rather than guessing.
@@ -464,7 +471,7 @@ async function actualizarLeadExistente(token, leadId, mergedLabels, phone, messa
   }
 }
 
-async function crearLeadCompleto({ name, email, phone, signals, message }) {
+async function crearLeadCompleto({ name, email, phone, signals, message, uniforme }) {
   const token = await refreshZohoToken();
   if (!token) {
     console.log("❌ crearLeadCompleto: no se obtuvo token de Zoho");
@@ -533,6 +540,18 @@ async function crearLeadCompleto({ name, email, phone, signals, message }) {
     record.Se_ales_de_Compra = labels;
   }
 
+  // Campo personalizado OPCIONAL: "Tipo de uniforme" / productos de interés.
+  // Los productos YA quedan guardados en Description (garantizado), asi que
+  // este intento es solo un "extra": si el api_name no existe en el layout o
+  // el valor no es valido, lo soltamos sin romper la creacion del lead.
+  // droppableFields lista los campos custom que se pueden eliminar con
+  // seguridad ante un INVALID_DATA.
+  const droppableFields = {};
+  if (uniforme) {
+    record.Tipo_de_uniforme = uniforme;
+    droppableFields["Tipo_de_uniforme"] = true;
+  }
+
   // Reintento automatico: el layout "Sports Leads" tiene varios campos
   // obligatorios. Si la API responde MANDATORY_NOT_FOUND, agregamos ese
   // campo con un valor placeholder y reintentamos (max 15 intentos).
@@ -568,6 +587,21 @@ async function crearLeadCompleto({ name, email, phone, signals, message }) {
         console.log("⚠️ Se_ales_de_Compra INVALID_DATA -> señales movidas a Description, reintentando");
         return true;
       }
+    }
+
+    // Campo custom opcional invalido o inexistente (p.ej. Tipo_de_uniforme):
+    // simplemente lo eliminamos y reintentamos. El dato ya vive en Description,
+    // por lo que no se pierde informacion.
+    if (
+      detail.code === "INVALID_DATA" &&
+      detail.details.api_name &&
+      droppableFields[detail.details.api_name] &&
+      record.hasOwnProperty(detail.details.api_name)
+    ) {
+      delete record[detail.details.api_name];
+      delete droppableFields[detail.details.api_name];
+      console.log("⚠️ Campo opcional " + detail.details.api_name + " INVALID_DATA -> eliminado (dato ya en Description), reintentando");
+      return true;
     }
 
     return false;
@@ -651,13 +685,24 @@ app.get("/lead-fields", async (req, res) => {
 app.post("/lead", async (req, res) => {
   console.log("📥 /lead request:", JSON.stringify(req.body));
   try {
-    let { name, email, phone, signals, buying_signals, message, raw_message, quantity, deadline, design } = req.body || {};
+    let { name, email, phone, signals, buying_signals, message, raw_message, quantity, deadline, design, products } = req.body || {};
+
+    // ✅ Productos seleccionados desde la landing de ciclismo
+    //    (botones "Get a quote" -> bot). Puede llegar como array o como
+    //    string separado por comas. Se normaliza a texto.
+    let productosTexto = "";
+    if (Array.isArray(products)) {
+      productosTexto = products.filter(Boolean).join(", ");
+    } else if (typeof products === "string") {
+      productosTexto = products.trim();
+    }
 
     // ✅ Campos del formulario estilo anuncio de ciclismo (Meta):
     //    cantidad, fecha de entrega y estado del diseño.
     //    Se incorporan a la Description para guardarlos en el CRM
     //    sin requerir campos personalizados nuevos.
     const detallesFormulario = [];
+    if (productosTexto) detallesFormulario.push("Productos de interés: " + productosTexto);
     if (quantity) detallesFormulario.push("Cantidad/Pedido: " + quantity);
     if (deadline) detallesFormulario.push("Fecha de entrega: " + deadline);
     if (design) detallesFormulario.push("Diseño: " + design);
@@ -692,7 +737,7 @@ app.post("/lead", async (req, res) => {
     }
 
     console.log("🧾 /lead señales finales a procesar:", signals, "email:", email);
-    const result = await crearLeadCompleto({ name, email, phone, signals, message });
+    const result = await crearLeadCompleto({ name, email, phone, signals, message, uniforme: productosTexto });
     console.log("📤 /lead resultado:", JSON.stringify(result));
     return res.json(result);
   } catch (err) {

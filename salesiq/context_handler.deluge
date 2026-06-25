@@ -1,0 +1,94 @@
+response = Map();
+
+// ---------------------------------------------------------------
+// Producto seleccionado en la landing (guardado por el Message Handler)
+// ---------------------------------------------------------------
+clickedProduct = "";
+ps = zoho.salesiq.visitorsession.get("jreyesilcmx","lead_clicked_product");
+if(ps != null && ps.get("data") != null && ps.get("data").get("lead_clicked_product") != null)
+{
+	clickedProduct = ps.get("data").get("lead_clicked_product");
+}
+
+// Productos elegidos en el formulario (multiselect Q0)
+addedProducts = "";
+if(answers.get("products") != null && answers.get("products").get("text") != null)
+{
+	addedProducts = answers.get("products").get("text").toString();
+}
+
+// Construir la lista final de productos para la cotizacion
+productParts = List();
+if(clickedProduct != null && clickedProduct != "")
+{
+	productParts.add(clickedProduct);
+}
+if(addedProducts != null && addedProducts != "")
+{
+	// Ignorar la opcion "No, solo <producto>"
+	if(!addedProducts.startsWith("No, solo"))
+	{
+		productParts.add(addedProducts);
+	}
+}
+productList = "";
+for each pp in productParts
+{
+	if(productList == "")
+	{
+		productList = pp;
+	}
+	else
+	{
+		productList = productList + ", " + pp;
+	}
+}
+if(productList == "")
+{
+	productList = "No especificado";
+}
+
+// Respuestas del cuestionario (mismo orden que el formulario del anuncio)
+leadQuantity = answers.get("quantity").get("text");
+leadDeadline = answers.get("deadline").get("text");
+leadDesign = answers.get("design").get("text");
+leadEmail = answers.get("email").get("text");
+leadName = answers.get("name").get("text");
+leadPhone = answers.get("phone").get("text");
+
+// Guardar en la sesión
+sessionMap = Map();
+sessionMap.put("lead_captured","true");
+sessionMap.put("lead_products",productList);
+sessionMap.put("lead_quantity",leadQuantity);
+sessionMap.put("lead_deadline",leadDeadline);
+sessionMap.put("lead_design",leadDesign);
+sessionMap.put("lead_email",leadEmail);
+sessionMap.put("lead_name",leadName);
+sessionMap.put("lead_phone",leadPhone);
+zoho.salesiq.visitorsession.set("jreyesilcmx",sessionMap);
+
+// Enviar el lead al backend (Render) para crearlo en Zoho CRM
+postData = Map();
+postData.put("name",leadName);
+postData.put("email",leadEmail);
+postData.put("phone",leadPhone);
+postData.put("quantity",leadQuantity);
+postData.put("deadline",leadDeadline);
+postData.put("design",leadDesign);
+postData.put("products",productList);
+postData.put("message","Lead de cotizacion desde la landing de ciclismo. Productos: " + productList);
+leadHeaders = Map();
+leadHeaders.put("Content-Type","application/json");
+leadResp = invokeurl
+[
+	url :"https://kaven-bot.onrender.com/lead"
+	type :POST
+	parameters:postData.toString()
+	headers:leadHeaders
+];
+info leadResp;
+
+response.put("action","reply");
+response.put("replies",{"Gracias " + leadName + "! Registre tu solicitud de cotizacion para: " + productList + " (" + leadQuantity + " piezas, entrega " + leadDeadline + "). En breve un asesor te contactara para enviarte tu cotizacion personalizada de uniformes de ciclismo. Mientras tanto, puedes ver nuestro catalogo aqui: https://www.kavensports.com/cycling-catalog"});
+return response;
