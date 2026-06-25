@@ -1,94 +1,351 @@
 response = Map();
-
-// ---------------------------------------------------------------
-// Producto seleccionado en la landing (guardado por el Message Handler)
-// ---------------------------------------------------------------
-clickedProduct = "";
-ps = zoho.salesiq.visitorsession.get("jreyesilcmx","lead_clicked_product");
-if(ps != null && ps.get("data") != null && ps.get("data").get("lead_clicked_product") != null)
+// =========================================================================
+// CONTEXT HANDLER v11 - Kaven Sports Bot
+// PROTECCION ANTI-DUPLICADOS REFORZADA (5 capas)
+//
+// PROBLEMA: El Context Handler puede ejecutarse multiples veces porque:
+//   a) El formulario se envia 2 veces (doble clic del usuario)
+//   b) SalesIQ re-ejecuta el handler internamente
+//   c) La sesion se pierde/resetea entre ejecuciones
+//
+// SOLUCION: 5 capas de proteccion independientes:
+//   CAPA 1 - Flag inmediato: Verificar lead_created ANTES de todo
+//   CAPA 2 - Lock de ejecucion: Marcar "en proceso" como PRIMERA accion
+//   CAPA 3 - Proteccion temporal: No crear si ya se creo en ultimos 5 min
+//   CAPA 4 - Dedup por email: Buscar lead existente en CRM por email
+//   CAPA 5 - Respuesta segura: Si backend falla, NO reintentar
+//
+// Autor: Kaven Sports Bot Team
+// Version: 11.0 (captura cantidad, fecha de entrega y diseno del
+// formulario estilo anuncio de ciclismo de Meta)
+// =========================================================================
+portalName = "jreyesilcmx";
+backendUrl = "https://kaven-bot.onrender.com/lead";
+// =========================================================================
+// CAPA 1: VERIFICACION INMEDIATA DEL FLAG (primera linea de defensa)
+// Leemos el flag ANTES de hacer cualquier otra cosa.
+// Si ya esta en "true", cortamos la ejecucion de inmediato.
+// =========================================================================
+flagCheck = zoho.salesiq.visitorsession.get(portalName,"lead_created");
+flagValue = "false";
+flagTimestamp = "";
+flagEmail = "";
+flagInProgress = "false";
+if(flagCheck != null)
 {
-	clickedProduct = ps.get("data").get("lead_clicked_product");
+        fData = flagCheck.get("data");
+        if(fData != null)
+        {
+                if(fData.get("lead_created") != null)
+                {
+                        flagValue = fData.get("lead_created").toString();
+                }
+                if(fData.get("lead_created_timestamp") != null)
+                {
+                        flagTimestamp = fData.get("lead_created_timestamp").toString();
+                }
+                if(fData.get("lead_email_saved") != null)
+                {
+                        flagEmail = fData.get("lead_email_saved").toString();
+                }
+                if(fData.get("lead_lock") != null)
+                {
+                        flagInProgress = fData.get("lead_lock").toString();
+                }
+        }
 }
-
-// Productos elegidos en el formulario (multiselect Q0)
+// --- Si el flag ya esta en true, BLOQUEAR de inmediato ---
+if(flagValue == "true")
+{
+        response.put("action","reply");
+        response.put("replies",{"Thank you! I already have your information on file. Let me continue helping you with your custom sports uniforms."});
+        return response;
+}
+// =========================================================================
+// CAPA 2: LOCK DE EJECUCION INMEDIATO (anti race-condition)
+// Marcamos el lock ANTES de leer answers, signals, idioma, o cualquier
+// otra cosa. Asi, si una segunda ejecucion llega 50ms despues,
+// vera el lock y se detendra.
+// =========================================================================
+if(flagInProgress == "true")
+{
+        // Otra ejecucion ya esta en proceso - bloquear esta
+        response.put("action","reply");
+        response.put("replies",{"Thank you! Your information is being processed right now. I will continue helping you shortly."});
+        return response;
+}
+// --- Escribir el lock INMEDIATAMENTE (antes de cualquier otra operacion) ---
+lockMap = Map();
+lockMap.put("lead_lock","true");
+lockMap.put("lead_created","false");
+lockMap.put("lead_lock_time",zoho.currenttime.toString());
+zoho.salesiq.visitorsession.set(portalName,lockMap);
+// =========================================================================
+// AHORA es seguro leer los datos del formulario
+// =========================================================================
+leadName = answers.get("name").get("text");
+leadEmail = answers.get("email").get("text");
+leadPhone = answers.get("phone").get("text");
+// --- Campos nuevos del formulario estilo anuncio de ciclismo ---
+leadQuantity = "";
+if(answers.get("quantity") != null)
+{
+        leadQuantity = answers.get("quantity").get("text");
+}
+leadDeadline = "";
+if(answers.get("deadline") != null)
+{
+        leadDeadline = answers.get("deadline").get("text");
+}
+leadDesign = "";
+if(answers.get("design") != null)
+{
+        leadDesign = answers.get("design").get("text");
+}
+// =========================================================================
+// PRODUCTOS DE LA COTIZACION (landing de ciclismo)
+// clickedProduct: producto del boton "Get a quote" (guardado por el
+// Message Handler). addedProducts: seleccion del multiselect Q0.
+// =========================================================================
+clickedProduct = "";
+psProd = zoho.salesiq.visitorsession.get(portalName,"lead_clicked_product");
+if(psProd != null)
+{
+        pData = psProd.get("data");
+        if(pData != null && pData.get("lead_clicked_product") != null)
+        {
+                clickedProduct = "" + pData.get("lead_clicked_product");
+        }
+}
 addedProducts = "";
 if(answers.get("products") != null && answers.get("products").get("text") != null)
 {
-	addedProducts = answers.get("products").get("text").toString();
+        addedProducts = "" + answers.get("products").get("text");
 }
-
-// Construir la lista final de productos para la cotizacion
 productParts = List();
-if(clickedProduct != null && clickedProduct != "")
+if(clickedProduct != "")
 {
-	productParts.add(clickedProduct);
+        productParts.add(clickedProduct);
 }
-if(addedProducts != null && addedProducts != "")
+// Ignorar la opcion "No, solo <producto>" (no agrega productos nuevos)
+if(addedProducts != "" && addedProducts.indexOf("No, solo") != 0)
 {
-	// Ignorar la opcion "No, solo <producto>"
-	if(!addedProducts.startsWith("No, solo"))
-	{
-		productParts.add(addedProducts);
-	}
+        productParts.add(addedProducts);
 }
 productList = "";
-for each pp in productParts
+for each  pp in productParts
 {
-	if(productList == "")
-	{
-		productList = pp;
-	}
-	else
-	{
-		productList = productList + ", " + pp;
-	}
+        if(productList == "")
+        {
+                productList = pp;
+        }
+        else
+        {
+                productList = productList + ", " + pp;
+        }
 }
 if(productList == "")
 {
-	productList = "No especificado";
+        productList = "No especificado";
 }
-
-// Respuestas del cuestionario (mismo orden que el formulario del anuncio)
-leadQuantity = answers.get("quantity").get("text");
-leadDeadline = answers.get("deadline").get("text");
-leadDesign = answers.get("design").get("text");
-leadEmail = answers.get("email").get("text");
-leadName = answers.get("name").get("text");
-leadPhone = answers.get("phone").get("text");
-
-// Guardar en la sesión
-sessionMap = Map();
-sessionMap.put("lead_captured","true");
-sessionMap.put("lead_products",productList);
-sessionMap.put("lead_quantity",leadQuantity);
-sessionMap.put("lead_deadline",leadDeadline);
-sessionMap.put("lead_design",leadDesign);
-sessionMap.put("lead_email",leadEmail);
-sessionMap.put("lead_name",leadName);
-sessionMap.put("lead_phone",leadPhone);
-zoho.salesiq.visitorsession.set("jreyesilcmx",sessionMap);
-
-// Enviar el lead al backend (Render) para crearlo en Zoho CRM
-postData = Map();
-postData.put("name",leadName);
-postData.put("email",leadEmail);
-postData.put("phone",leadPhone);
-postData.put("quantity",leadQuantity);
-postData.put("deadline",leadDeadline);
-postData.put("design",leadDesign);
-postData.put("products",productList);
-postData.put("message","Lead de cotizacion desde la landing de ciclismo. Productos: " + productList);
-leadHeaders = Map();
-leadHeaders.put("Content-Type","application/json");
-leadResp = invokeurl
-[
-	url :"https://kaven-bot.onrender.com/lead"
-	type :POST
-	parameters:postData.toString()
-	headers:leadHeaders
-];
-info leadResp;
-
+// =========================================================================
+// CAPA 3: PROTECCION TEMPORAL (ventana de 5 minutos)
+// Si el timestamp guardado indica que se creo un lead hace menos de
+// 5 minutos, bloquear aunque el flag se haya perdido.
+// Esto protege contra resets de sesion parciales.
+// =========================================================================
+if(flagTimestamp != "")
+{
+        savedTime = flagTimestamp.toTime("yyyy-MM-dd HH:mm:ss");
+        currentTime = zoho.currenttime;
+        diffMinutes = (currentTime.toLong() - savedTime.toLong()) / 60000;
+        if(diffMinutes < 5)
+        {
+                // Se creo un lead hace menos de 5 minutos - bloquear
+                safeState = Map();
+                safeState.put("lead_created","true");
+                safeState.put("lead_lock","false");
+                safeState.put("lead_created_timestamp",flagTimestamp);
+                safeState.put("lead_email_saved",flagEmail);
+                safeState.put("debug_blocked_by","capa3_temporal");
+                zoho.salesiq.visitorsession.set(portalName,safeState);
+                response.put("action","reply");
+                response.put("replies",{"Thank you! Your information was already saved. Let me continue helping you."});
+                return response;
+        }
+}
+// =========================================================================
+// CAPA 4: DEDUPLICACION POR EMAIL EN CRM (verificacion real)
+// Buscamos directamente en Zoho CRM si ya existe un lead con este email.
+// Esta es la proteccion mas solida porque no depende de la sesion.
+// =========================================================================
+existingLeads = zoho.crm.searchRecords("Leads","(Email:equals:" + leadEmail + ")");
+if(existingLeads != null && existingLeads.size() > 0)
+{
+        // Ya existe un lead con este email en CRM - no crear otro
+        existingId = existingLeads.get(0).get("id");
+        dedupState = Map();
+        dedupState.put("lead_created","true");
+        dedupState.put("lead_lock","false");
+        dedupState.put("lead_created_timestamp",zoho.currenttime.toString("yyyy-MM-dd HH:mm:ss"));
+        dedupState.put("lead_email_saved",leadEmail);
+        dedupState.put("crm_lead_id",existingId);
+        dedupState.put("debug_blocked_by","capa4_crm_dedup");
+        zoho.salesiq.visitorsession.set(portalName,dedupState);
+        response.put("action","reply");
+        response.put("replies",{"Thank you, " + leadName + "! I already have your details. Let me continue helping you with your custom sports uniforms."});
+        return response;
+}
+// =========================================================================
+// TODAS LAS CAPAS SUPERADAS - Proceder con creacion del lead
+// =========================================================================
+// --- Recuperar idioma de la sesion ---
+botLang = "en";
+sessLang = zoho.salesiq.visitorsession.get(portalName,"bot_lang");
+if(sessLang != null)
+{
+        langData = sessLang.get("data");
+        if(langData != null && langData.get("bot_lang") != null)
+        {
+                botLang = langData.get("bot_lang").toString();
+        }
+}
+// --- Recuperar senales de compra acumuladas ---
+signalsRaw = "";
+sessSig = zoho.salesiq.visitorsession.get(portalName,"buy_signals");
+if(sessSig != null)
+{
+        sigData = sessSig.get("data");
+        if(sigData != null && sigData.get("buy_signals") != null)
+        {
+                signalsRaw = sigData.get("buy_signals").toString();
+        }
+}
+signalsList = List();
+if(signalsRaw != "")
+{
+        parts = signalsRaw.toList(",");
+        for each  part in parts
+        {
+                trimmed = part.trim();
+                if(trimmed != "" && !signalsList.contains(trimmed))
+                {
+                        signalsList.add(trimmed);
+                }
+        }
+}
+// --- Recuperar ultimo mensaje del usuario ---
+rawMessage = "";
+sessRaw = zoho.salesiq.visitorsession.get(portalName,"raw_message");
+if(sessRaw != null)
+{
+        rawData = sessRaw.get("data");
+        if(rawData != null && rawData.get("raw_message") != null)
+        {
+                rawMessage = rawData.get("raw_message").toString();
+        }
+}
+lastUserMessage = "";
+sessLast = zoho.salesiq.visitorsession.get(portalName,"last_user_message");
+if(sessLast != null)
+{
+        lastData = sessLast.get("data");
+        if(lastData != null && lastData.get("last_user_message") != null)
+        {
+                lastUserMessage = lastData.get("last_user_message").toString();
+        }
+}
+if(rawMessage == "" && lastUserMessage != "")
+{
+        rawMessage = lastUserMessage;
+}
+// --- Construir payload para el backend ---
+postBody = Map();
+postBody.put("name",leadName);
+postBody.put("email",leadEmail);
+postBody.put("phone",leadPhone);
+postBody.put("quantity",leadQuantity);
+postBody.put("deadline",leadDeadline);
+postBody.put("design",leadDesign);
+postBody.put("products",productList);
+postBody.put("signals",signalsList);
+postBody.put("buying_signals",signalsList);
+postBody.put("raw_message",rawMessage);
+postBody.put("message","Lead capturado por chatbot Kaven Sports");
+postBody.put("language",botLang);
+postBody.put("debug_source","SalesIQ Context Handler v10 anti-duplicados");
+headerMap = Map();
+headerMap.put("Content-Type","application/json");
+// --- Llamada al backend ---
+crmId = "";
+crmOk = "false";
+leadRespText = "";
+try 
+{
+        leadResp = invokeurl
+        [
+                url :backendUrl
+                type :POST
+                parameters:postBody.toString()
+                headers:headerMap
+        ];
+        if(leadResp != null)
+        {
+                leadRespText = leadResp.toString();
+                respMap = leadResp.toMap();
+                if(respMap.get("ok") != null)
+                {
+                        crmOk = respMap.get("ok").toString();
+                }
+                if(respMap.get("id") != null)
+                {
+                        crmId = respMap.get("id").toString();
+                }
+        }
+}
+catch (e)
+{
+        leadRespText = "ERROR: " + e.toString();
+        crmOk = "false";
+}
+// =========================================================================
+// CAPA 5: MARCAR COMO CREADO SIN IMPORTAR EL RESULTADO
+// Incluso si el backend fallo, marcamos lead_created = true para
+// evitar reintentos automaticos que generen duplicados.
+// Si fallo, el equipo revisara manualmente.
+// NUNCA reintentar automaticamente.
+// =========================================================================
+nowStr = zoho.currenttime.toString("yyyy-MM-dd HH:mm:ss");
+finalState = Map();
+finalState.put("lead_created","true");
+finalState.put("lead_lock","false");
+finalState.put("lead_created_timestamp",nowStr);
+finalState.put("lead_email_saved",leadEmail);
+finalState.put("lead_name",leadName);
+finalState.put("lead_phone",leadPhone);
+finalState.put("lead_quantity",leadQuantity);
+finalState.put("lead_deadline",leadDeadline);
+finalState.put("lead_design",leadDesign);
+finalState.put("lead_products",productList);
+finalState.put("crm_lead_id",crmId);
+finalState.put("crm_ok",crmOk);
+finalState.put("crm_buy_signals",signalsRaw);
+finalState.put("buy_signals",signalsRaw);
+finalState.put("raw_message",rawMessage);
+finalState.put("last_user_message",lastUserMessage);
+finalState.put("bot_lang",botLang);
+finalState.put("debug_ch_version","v10_anti_duplicados");
+finalState.put("debug_backend_response",leadRespText);
+zoho.salesiq.visitorsession.set(portalName,finalState);
+// --- Mensaje de confirmacion ---
+if(botLang == "es")
+{
+        confirmation = "Gracias, " + leadName + "! Ya registre tu solicitud de cotizacion para: " + productList + " (" + leadQuantity + " personas, entrega " + leadDeadline + "). En breve un asesor te contactara con tu cotizacion de uniformes de ciclismo. Mientras tanto puedes ver el catalogo: https://www.kavensports.com/cycling-catalog";
+}
+else
+{
+        confirmation = "Thank you, " + leadName + "! I have registered your quote request for: " + productList + " (" + leadQuantity + " people, delivery " + leadDeadline + "). An advisor will contact you shortly with your cycling uniform quote. Meanwhile you can browse our catalog: https://www.kavensports.com/cycling-catalog";
+}
 response.put("action","reply");
-response.put("replies",{"Gracias " + leadName + "! Registre tu solicitud de cotizacion para: " + productList + " (" + leadQuantity + " piezas, entrega " + leadDeadline + "). En breve un asesor te contactara para enviarte tu cotizacion personalizada de uniformes de ciclismo. Mientras tanto, puedes ver nuestro catalogo aqui: https://www.kavensports.com/cycling-catalog"});
+response.put("replies",{confirmation});
 return response;

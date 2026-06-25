@@ -1,6 +1,11 @@
 response = Map();
 
 input = message.get("text");
+inputText = "";
+if(input != null)
+{
+        inputText = "" + input;
+}
 
 // ---------------------------------------------------------------
 // Productos del catalogo de ciclismo (botones "Get a quote")
@@ -10,9 +15,9 @@ allProducts = {"Standard Jersey","Elite Jersey","Premier Jersey","Standard Bib S
 // Detectar el producto seleccionado en la landing.
 // La landing abre el chat con un primer mensaje: "Quiero cotizar: <producto>"
 clickedProduct = "";
-if(input != null && input.contains("Quiero cotizar:"))
+if(inputText.indexOf("Quiero cotizar:") >= 0)
 {
-        clickedProduct = input.getSuffix("Quiero cotizar:").trim();
+        clickedProduct = inputText.getSuffix("Quiero cotizar:").trim();
         // Guardar el producto en la sesion para el Context Handler
         prodSess = Map();
         prodSess.put("lead_clicked_product",clickedProduct);
@@ -29,7 +34,7 @@ if(sess != null && sess.get("data") != null && sess.get("data").get("lead_captur
 
 // Llamada al backend IA (Render)
 postBody = Map();
-postBody.put("message",input);
+postBody.put("message",inputText);
 headerMap = Map();
 headerMap.put("Content-Type","application/json");
 resp = invokeurl
@@ -56,7 +61,7 @@ collectContact = "false";
 collectFlag = respMap.get("collect_contact");
 if(collectFlag != null)
 {
-        collectContact = collectFlag.toString().toLowerCase();
+        collectContact = ("" + collectFlag).toLowerCase();
 }
 
 // Si el visitante hizo clic en un boton de producto, forzamos la captura
