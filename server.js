@@ -651,7 +651,20 @@ app.get("/lead-fields", async (req, res) => {
 app.post("/lead", async (req, res) => {
   console.log("📥 /lead request:", JSON.stringify(req.body));
   try {
-    let { name, email, phone, signals, buying_signals, message, raw_message } = req.body || {};
+    let { name, email, phone, signals, buying_signals, message, raw_message, quantity, deadline, design } = req.body || {};
+
+    // ✅ Campos del formulario estilo anuncio de ciclismo (Meta):
+    //    cantidad, fecha de entrega y estado del diseño.
+    //    Se incorporan a la Description para guardarlos en el CRM
+    //    sin requerir campos personalizados nuevos.
+    const detallesFormulario = [];
+    if (quantity) detallesFormulario.push("Cantidad/Pedido: " + quantity);
+    if (deadline) detallesFormulario.push("Fecha de entrega: " + deadline);
+    if (design) detallesFormulario.push("Diseño: " + design);
+    if (detallesFormulario.length > 0) {
+      const bloque = "Datos del formulario (anuncio ciclismo) -> " + detallesFormulario.join(" | ");
+      message = message ? (message + " | " + bloque) : bloque;
+    }
 
     // Compatibilidad con SalesIQ Context Handler v8/v9:
     // v8 envio el campo como buying_signals, mientras que el backend
