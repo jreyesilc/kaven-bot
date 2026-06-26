@@ -265,7 +265,7 @@ if(existingLeads != null && existingLeads.size() > 0)
                                 // Separar por coma o punto y coma
                                 if(esStr.indexOf(",") >= 0)
                                 {
-                                        esParts = esStr.split(",");
+                                        esParts = esStr.toList(",");
                                         for each  ep in esParts
                                         {
                                                 epTrim = ep.trim();
@@ -277,7 +277,7 @@ if(existingLeads != null && existingLeads.size() > 0)
                                 }
                                 else if(esStr.indexOf(";") >= 0)
                                 {
-                                        esParts = esStr.split(";");
+                                        esParts = esStr.toList(";");
                                         for each  ep in esParts
                                         {
                                                 epTrim = ep.trim();
@@ -363,8 +363,8 @@ else
         spaceIdx = fullName.indexOf(" ");
         if(spaceIdx > 0)
         {
-                firstName = fullName.substring(0,spaceIdx).trim();
-                lastName = fullName.substring(spaceIdx + 1).trim();
+                firstName = fullName.subString(0,spaceIdx).trim();
+                lastName = fullName.subString(spaceIdx + 1).trim();
         }
         
         // Construir descripción
