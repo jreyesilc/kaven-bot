@@ -1,0 +1,511 @@
+response = Map();
+// =========================================================================
+// CONTEXT HANDLER v14 - NATIVO (sin backend Render)
+// CREACION DE LEADS DIRECTA EN ZOHO CRM
+//
+// CAMBIOS vs v13:
+//   - NO llama al backend de Render para crear leads
+//   - Crea/actualiza leads directamente con zoho.crm.createRecord/updateRecord
+//   - Lee señales de "lead_signals" (Message Handler v14)
+//   - Implementa deduplicación por email con merge de señales
+//   - Mapea señales a etiquetas exactas del picklist Se_ales_de_Compra
+//
+// PROTECCION ANTI-DUPLICADOS: 5 capas (igual que v13)
+//   CAPA 1 - Flag inmediato
+//   CAPA 2 - Lock de ejecución
+//   CAPA 3 - Protección temporal (5 min)
+//   CAPA 4 - Dedup por email en CRM
+//   CAPA 5 - Estado seguro
+//
+// Autor: Kaven Sports Bot Team (Fase 2 migración nativa)
+// Version: 14.0 (CRM nativo)
+// =========================================================================
+portalName = "jreyesilcmx";
+layoutId = "5941168000003464001";
+
+// =========================================================================
+// CAPA 1: VERIFICACION INMEDIATA DEL FLAG
+// =========================================================================
+flagCheck = zoho.salesiq.visitorsession.get(portalName,"lead_created");
+flagValue = "false";
+flagTimestamp = "";
+flagPhone = "";
+flagEmail = "";
+flagInProgress = "false";
+
+if(flagCheck != null)
+{
+        fData = flagCheck.get("data");
+        if(fData != null)
+        {
+                if(fData.get("lead_created") != null)
+                {
+                        flagValue = fData.get("lead_created").toString();
+                }
+                if(fData.get("lead_created_timestamp") != null)
+                {
+                        flagTimestamp = fData.get("lead_created_timestamp").toString();
+                }
+                if(fData.get("lead_phone_saved") != null)
+                {
+                        flagPhone = fData.get("lead_phone_saved").toString();
+                }
+                if(fData.get("lead_email_saved") != null)
+                {
+                        flagEmail = fData.get("lead_email_saved").toString();
+                }
+                if(fData.get("lead_lock") != null)
+                {
+                        flagInProgress = fData.get("lead_lock").toString();
+                }
+        }
+}
+
+if(flagValue == "true")
+{
+        response.put("action","reply");
+        response.put("replies",{"Gracias! Ya tengo tu información registrada. Te contactaremos pronto por WhatsApp."});
+        return response;
+}
+
+// =========================================================================
+// CAPA 2: LOCK DE EJECUCION INMEDIATO
+// =========================================================================
+if(flagInProgress == "true")
+{
+        response.put("action","reply");
+        response.put("replies",{"Gracias! Tu información se está procesando. Te contactaremos pronto."});
+        return response;
+}
+
+lockMap = Map();
+lockMap.put("lead_lock","true");
+lockMap.put("lead_created","false");
+lockMap.put("lead_lock_time",zoho.currenttime.toString());
+zoho.salesiq.visitorsession.set(portalName,lockMap);
+
+// =========================================================================
+// LEER DATOS DEL FORMULARIO
+// =========================================================================
+leadPhone = answers.get("phone").get("text");
+leadName = answers.get("name").get("text");
+
+// Producto seleccionado (multiselect)
+productAnswer = answers.get("product");
+productList = "";
+if(productAnswer != null)
+{
+        productText = productAnswer.get("text");
+        if(productText != null)
+        {
+                productList = productText.toString();
+        }
+}
+
+// =========================================================================
+// GENERAR EMAIL PLACEHOLDER (si no viene de landing)
+// El formulario corto del bot NO pide email, lo generamos basado en teléfono
+// para cumplir con el campo obligatorio de CRM.
+// =========================================================================
+phoneDigits = leadPhone.replaceAll("[^0-9]","","ALL");
+if(phoneDigits != "")
+{
+        leadEmail = "lead-" + phoneDigits + "@kavensports.com";
+}
+else
+{
+        leadEmail = "lead-" + zoho.currenttime.toLong() + "@kavensports.com";
+}
+
+// =========================================================================
+// CAPA 3: PROTECCION TEMPORAL (ventana de 5 minutos)
+// =========================================================================
+if(flagTimestamp != "")
+{
+        savedTime = flagTimestamp.toTime("yyyy-MM-dd HH:mm:ss");
+        currentTime = zoho.currenttime;
+        diffMinutes = (currentTime.toLong() - savedTime.toLong()) / 60000;
+        if(diffMinutes < 5)
+        {
+                safeState = Map();
+                safeState.put("lead_created","true");
+                safeState.put("lead_lock","false");
+                safeState.put("lead_created_timestamp",flagTimestamp);
+                safeState.put("lead_phone_saved",flagPhone);
+                safeState.put("lead_email_saved",flagEmail);
+                safeState.put("debug_blocked_by","capa3_temporal");
+                zoho.salesiq.visitorsession.set(portalName,safeState);
+                
+                response.put("action","reply");
+                response.put("replies",{"Gracias! Tu información ya fue registrada. Te contactaremos pronto."});
+                return response;
+        }
+}
+
+// =========================================================================
+// RECUPERAR SEÑALES DE COMPRA (Message Handler v14)
+// =========================================================================
+signalsRaw = "";
+sessSig = zoho.salesiq.visitorsession.get(portalName,"lead_signals");
+if(sessSig != null)
+{
+        sigData = sessSig.get("data");
+        if(sigData != null && sigData.get("lead_signals") != null)
+        {
+                signalsRaw = sigData.get("lead_signals").toString();
+        }
+}
+
+// Parsear señales (vienen como "pricing,quantity,direct_interest")
+signalsList = List();
+if(signalsRaw != "")
+{
+        parts = signalsRaw.toList(",");
+        for each  part in parts
+        {
+                trimmed = part.trim();
+                if(trimmed != "" && !signalsList.contains(trimmed))
+                {
+                        signalsList.add(trimmed);
+                }
+        }
+}
+
+// =========================================================================
+// MAPEAR SEÑALES A ETIQUETAS EXACTAS DEL PICKLIST
+// (igual que SIGNAL_LABELS del server.js)
+// =========================================================================
+labelsList = List();
+for each  sig in signalsList
+{
+        sigLower = sig.toLowerCase();
+        if(sigLower == "pricing")
+        {
+                labelsList.add("Precio / Cotización (pricing)");
+        }
+        else if(sigLower == "quantity")
+        {
+                labelsList.add("Cantidad / Pedido mínimo (quantity)");
+        }
+        else if(sigLower == "customization")
+        {
+                labelsList.add("Personalización / Logo / Diseño (customization)");
+        }
+        else if(sigLower == "timeline")
+        {
+                labelsList.add("Tiempo de entrega (timeline)");
+        }
+        else if(sigLower == "direct_interest")
+        {
+                labelsList.add("Interés directo de compra (direct_interest)");
+        }
+}
+
+// =========================================================================
+// RECUPERAR ULTIMO MENSAJE DEL USUARIO
+// =========================================================================
+rawMessage = "";
+sessRaw = zoho.salesiq.visitorsession.get(portalName,"raw_message");
+if(sessRaw != null)
+{
+        rawData = sessRaw.get("data");
+        if(rawData != null && rawData.get("raw_message") != null)
+        {
+                rawMessage = rawData.get("raw_message").toString();
+        }
+}
+
+// =========================================================================
+// CAPA 4: DEDUPLICACION POR EMAIL EN CRM
+// Buscar si ya existe un lead con este email (el placeholder es único por teléfono)
+// Si existe: actualizar con merge de señales
+// Si no existe: crear nuevo
+// =========================================================================
+existingLeads = zoho.crm.searchRecords("Leads","(Email:equals:" + leadEmail + ")");
+crmId = "";
+crmOk = "false";
+isDuplicate = "false";
+debugInfo = "";
+
+if(existingLeads != null && existingLeads.size() > 0)
+{
+        // =====================================================================
+        // LEAD EXISTENTE - ACTUALIZAR CON MERGE DE SEÑALES
+        // =====================================================================
+        existingLead = existingLeads.get(0);
+        existingId = existingLead.get("id").toString();
+        crmId = existingId;
+        isDuplicate = "true";
+        
+        // Obtener señales existentes del CRM
+        existingSignals = existingLead.get("Se_ales_de_Compra");
+        mergedLabels = List();
+        
+        // Agregar señales existentes (puede ser List o String separado por comas)
+        if(existingSignals != null)
+        {
+                // Intentar iterar como List (Deluge permite esto si es una colección)
+                try 
+                {
+                        for each  es in existingSignals
+                        {
+                                esStr = es.toString().trim();
+                                if(esStr != "" && !mergedLabels.contains(esStr))
+                                {
+                                        mergedLabels.add(esStr);
+                                }
+                        }
+                }
+                catch (e)
+                {
+                        // Si falla, es un String - parsear por separadores
+                        esStr = existingSignals.toString();
+                        if(esStr != "")
+                        {
+                                // Separar por coma o punto y coma
+                                if(esStr.indexOf(",") >= 0)
+                                {
+                                        esParts = esStr.split(",");
+                                        for each  ep in esParts
+                                        {
+                                                epTrim = ep.trim();
+                                                if(epTrim != "" && !mergedLabels.contains(epTrim))
+                                                {
+                                                        mergedLabels.add(epTrim);
+                                                }
+                                        }
+                                }
+                                else if(esStr.indexOf(";") >= 0)
+                                {
+                                        esParts = esStr.split(";");
+                                        for each  ep in esParts
+                                        {
+                                                epTrim = ep.trim();
+                                                if(epTrim != "" && !mergedLabels.contains(epTrim))
+                                                {
+                                                        mergedLabels.add(epTrim);
+                                                }
+                                        }
+                                }
+                                else if(!mergedLabels.contains(esStr))
+                                {
+                                        mergedLabels.add(esStr);
+                                }
+                        }
+                }
+        }
+        
+        // Agregar nuevas señales (sin duplicar)
+        for each  newLabel in labelsList
+        {
+                if(!mergedLabels.contains(newLabel))
+                {
+                        mergedLabels.add(newLabel);
+                }
+        }
+        
+        // Actualizar lead existente
+        try 
+        {
+                updateMap = Map();
+                updateMap.put("id",existingId);
+                if(mergedLabels.size() > 0)
+                {
+                        updateMap.put("Se_ales_de_Compra",mergedLabels);
+                }
+                if(leadPhone != "" && leadPhone != null)
+                {
+                        updateMap.put("Phone",leadPhone);
+                }
+                if(rawMessage != "")
+                {
+                        // Agregar nuevo mensaje a la descripción existente
+                        existingDesc = existingLead.get("Description");
+                        if(existingDesc != null && existingDesc.toString() != "")
+                        {
+                                updateMap.put("Description",existingDesc.toString() + " | " + rawMessage);
+                        }
+                        else
+                        {
+                                updateMap.put("Description",rawMessage);
+                        }
+                }
+                
+                updateResp = zoho.crm.updateRecord("Leads",existingId,updateMap);
+                
+                if(updateResp != null)
+                {
+                        crmOk = "true";
+                        debugInfo = "Lead existente actualizado: " + existingId + " | Señales merged: " + mergedLabels.size();
+                }
+                else
+                {
+                        crmOk = "false";
+                        debugInfo = "updateRecord devolvió null";
+                }
+        }
+        catch (e)
+        {
+                crmOk = "false";
+                debugInfo = "Error actualizando lead: " + e.toString();
+        }
+}
+else
+{
+        // =====================================================================
+        // LEAD NUEVO - CREAR EN CRM
+        // =====================================================================
+        
+        // Dividir nombre completo en First_Name y Last_Name (requerido por layout Sports Leads)
+        fullName = leadName.trim();
+        firstName = fullName;
+        lastName = fullName;
+        spaceIdx = fullName.indexOf(" ");
+        if(spaceIdx > 0)
+        {
+                firstName = fullName.substring(0,spaceIdx).trim();
+                lastName = fullName.substring(spaceIdx + 1).trim();
+        }
+        
+        // Construir descripción
+        description = "Lead capturado por chatbot Kaven Sports (Context Handler v14 nativo)";
+        if(rawMessage != "")
+        {
+                description = description + " | Mensaje: " + rawMessage;
+        }
+        if(productList != "" && productList != "No especificado")
+        {
+                description = description + " | Productos: " + productList;
+        }
+        
+        // Construir registro para CRM
+        try 
+        {
+                leadMap = Map();
+                leadMap.put("First_Name",firstName);
+                leadMap.put("Last_Name",lastName);
+                leadMap.put("Email",leadEmail);
+                leadMap.put("Phone",leadPhone);
+                leadMap.put("Description",description);
+                leadMap.put("Lead_Source","Bot SalesIQ");
+                leadMap.put("Company","Kaven Sports - Cliente Potencial");
+                
+                // Layout Sports Leads
+                layoutMap = Map();
+                layoutMap.put("id",layoutId);
+                leadMap.put("Layout",layoutMap);
+                
+                // Señales de compra (si hay)
+                if(labelsList.size() > 0)
+                {
+                        leadMap.put("Se_ales_de_Compra",labelsList);
+                }
+                
+                createResp = zoho.crm.createRecord("Leads",leadMap);
+                
+                if(createResp != null)
+                {
+                        // Extraer ID del lead creado
+                        if(createResp.get("id") != null)
+                        {
+                                crmId = createResp.get("id").toString();
+                                crmOk = "true";
+                                debugInfo = "Lead creado: " + crmId + " | Señales: " + labelsList.size();
+                        }
+                        else if(createResp.get("details") != null)
+                        {
+                                details = createResp.get("details");
+                                if(details.get("id") != null)
+                                {
+                                        crmId = details.get("id").toString();
+                                        crmOk = "true";
+                                        debugInfo = "Lead creado (details): " + crmId;
+                                }
+                        }
+                        else
+                        {
+                                crmOk = "false";
+                                debugInfo = "createRecord OK pero sin ID: " + createResp.toString();
+                        }
+                }
+                else
+                {
+                        crmOk = "false";
+                        debugInfo = "createRecord devolvió null";
+                }
+        }
+        catch (e)
+        {
+                crmOk = "false";
+                debugInfo = "Error creando lead: " + e.toString();
+        }
+}
+
+// =========================================================================
+// CAPA 5: MARCAR COMO CREADO (estado seguro)
+// =========================================================================
+nowStr = zoho.currenttime.toString("yyyy-MM-dd HH:mm:ss");
+finalState = Map();
+finalState.put("lead_created","true");
+finalState.put("lead_lock","false");
+finalState.put("lead_created_timestamp",nowStr);
+finalState.put("lead_phone_saved",leadPhone);
+finalState.put("lead_email_saved",leadEmail);
+finalState.put("lead_name",leadName);
+finalState.put("lead_products",productList);
+finalState.put("crm_lead_id",crmId);
+finalState.put("crm_ok",crmOk);
+finalState.put("crm_is_duplicate",isDuplicate);
+finalState.put("crm_signals",signalsRaw);
+finalState.put("crm_labels_count",labelsList.size().toString());
+finalState.put("raw_message",rawMessage);
+finalState.put("debug_ch_version","v14_nativo");
+finalState.put("debug_info",debugInfo);
+zoho.salesiq.visitorsession.set(portalName,finalState);
+
+// Actualizar flag para que el bot sepa que ya se capturó
+capturedFlag = Map();
+capturedFlag.put("lead_captured","true");
+zoho.salesiq.visitorsession.set(portalName,capturedFlag);
+
+// =========================================================================
+// MENSAJE DE CONFIRMACION
+// =========================================================================
+botLang = "es";
+sessLang = zoho.salesiq.visitorsession.get(portalName,"bot_lang");
+if(sessLang != null)
+{
+        langData = sessLang.get("data");
+        if(langData != null && langData.get("bot_lang") != null)
+        {
+                botLang = langData.get("bot_lang").toString();
+        }
+}
+
+confirmation = "";
+if(botLang == "es")
+{
+        if(productList != "" && productList != "No especificado")
+        {
+                confirmation = "Listo, " + leadName + "! Ya registré tu solicitud para: " + productList + ". Te contactaremos pronto por WhatsApp al " + leadPhone + " para enviarte tu cotización personalizada. Mientras tanto puedes ver el catálogo: https://www.kavensports.com/cycling-catalog";
+        }
+        else
+        {
+                confirmation = "Listo, " + leadName + "! Ya registré tu información. Te contactaremos pronto por WhatsApp al " + leadPhone + " para ayudarte con tu cotización de uniformes personalizados.";
+        }
+}
+else
+{
+        if(productList != "" && productList != "No especificado")
+        {
+                confirmation = "Done, " + leadName + "! I have registered your request for: " + productList + ". We will contact you soon via WhatsApp at " + leadPhone + " with your personalized quote. Meanwhile check our catalog: https://www.kavensports.com/cycling-catalog";
+        }
+        else
+        {
+                confirmation = "Done, " + leadName + "! Your information has been registered. We will contact you soon via WhatsApp at " + leadPhone + " to help with your custom uniform quote.";
+        }
+}
+
+response.put("action","reply");
+response.put("replies",{confirmation});
+return response;
