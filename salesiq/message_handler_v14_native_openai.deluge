@@ -51,27 +51,80 @@ norm = norm.replaceAll("ü","u",true);
 norm = norm.replaceAll("\\s+"," ",false);
 norm = norm.trim();
 
+// NOTA: usamos contains() en lugar de regex matches(). En Deluge el escape
+// de \\b en matches() no funciona de forma confiable, por eso la deteccion
+// por palabras clave (contains) es mas robusta.
 signalCats = List();
-if(norm.matches(".*(\\bprecio\\b|\\bprice\\b|\\bprices\\b|\\bpricing\\b|per\\s+unit|per\\s+piece|cuanto\\s+cuesta|cost(o|ar|s)?|how\\s+much|quote|cotiz(ar|acion)|\\bbudget\\b|\\$\\s*\\d).*"))
+
+pricingKw = {"precio","price","pricing","per unit","per piece","cuanto cuesta","cuanto vale","costo","cuesta","cost","how much","quote","cotiz","budget","presupuesto"};
+for each kw in pricingKw
 {
-        signalCats.add("pricing");
+        if(norm.contains(kw) && !signalCats.contains("pricing"))
+        {
+                signalCats.add("pricing");
+        }
 }
-if(norm.matches(".*(\\bcuantos\\b|\\bcantidad\\b|minimum\\s+order|minimo\\s+de\\s+(pedido|compra)|moq|how\\s+many|\\bunits?\\b|\\bpieces?\\b|\\bbulk\\b|\\bdozen\\b|\\d{1,6}\\s*(custom\\s+)?(uniforms?|jerseys?|shirts?|kits?|pieces?|units?|sets?|pcs?|players?|team)).*"))
+
+quantityKw = {"cuantos","cantidad","minimum order","minimo de pedido","minimo de compra","pedido minimo","moq","how many","units","unidad","piezas","pieza","bulk","dozen","docena","mayoreo"};
+for each kw in quantityKw
 {
-        signalCats.add("quantity");
+        if(norm.contains(kw) && !signalCats.contains("quantity"))
+        {
+                signalCats.add("quantity");
+        }
 }
-if(norm.matches(".*(\\bdiseno\\b|personaliz(ar|ado)|customi[sz]e|custom\\b|logo|colores?|nombre\\s+en\\s+el\\s+uniforme).*"))
+// Cantidad por numero + producto (ej: "30 jerseys", "20 uniformes")
+if(!signalCats.contains("quantity"))
 {
-        signalCats.add("customization");
+        hasDigit = false;
+        digits = {"0","1","2","3","4","5","6","7","8","9"};
+        for each d in digits
+        {
+                if(norm.contains(d))
+                {
+                        hasDigit = true;
+                }
+        }
+        if(hasDigit)
+        {
+                prodWords = {"uniform","jersey","shirt","camiseta","playera","kit","set","player","jugador","team","equipo","pieza","piece","unit","unidad","short","hoodie","sudadera"};
+                for each pw in prodWords
+                {
+                        if(norm.contains(pw) && !signalCats.contains("quantity"))
+                        {
+                                signalCats.add("quantity");
+                        }
+                }
+        }
 }
-if(norm.matches(".*(cuanto\\s+tiempo|\\bentrega\\b|delivery|when\\b|lead\\s*time|tiempo\\s+de\\s+produccion).*"))
+
+customKw = {"diseno","personaliz","customize","customise","custom","logo","color","sublimad","nombre en el uniforme"};
+for each kw in customKw
 {
-        signalCats.add("timeline");
+        if(norm.contains(kw) && !signalCats.contains("customization"))
+        {
+                signalCats.add("customization");
+        }
 }
-if(norm.matches(".*(quiero\\s+cotizar|me\\s+interesa|i\\s*(am|'m)\\s+interested|want\\s+a\\s+quote|how\\s+to\\s+order|como\\s+ordeno|quiero\\s+comprar|listo\\s+para\\s+comprar).*"))
+
+timelineKw = {"cuanto tiempo","cuanto tarda","entrega","delivery","lead time","tiempo de produccion","when do","when can","how soon","how long","plazo","tarda"};
+for each kw in timelineKw
 {
-        signalCats.add("direct_interest");
+        if(norm.contains(kw) && !signalCats.contains("timeline"))
+        {
+                signalCats.add("timeline");
+        }
 }
+
+interestKw = {"quiero cotizar","me interesa","i am interested","i'm interested","im interested","want a quote","how to order","como ordeno","como ordenar","quiero comprar","quiero ordenar","listo para comprar","want to order","place an order","ready to order"};
+for each kw in interestKw
+{
+        if(norm.contains(kw) && !signalCats.contains("direct_interest"))
+        {
+                signalCats.add("direct_interest");
+        }
+}
+
 collectContact = "false";
 if(signalCats.size() > 0)
 {
@@ -98,11 +151,29 @@ if(langSess != null && langSess.get("data") != null && langSess.get("data").get(
 curLang = prevLang;
 if(clickedProduct == "")
 {
-        if(norm.matches(".*(\\bhola\\b|\\bbuenas\\b|\\bgracias\\b|\\bquiero\\b|\\bnecesito\\b|\\bcuanto\\b|\\bcuantos\\b|\\bcuesta\\b|\\bprecio\\b|cotiz|uniforme|\\bequipo\\b|playera|camiseta|\\bdiseno\\b|\\bcolores\\b|\\bentrega\\b|\\bpedido\\b|\\bayuda\\b|\\bpara\\b|\\bgustaria\\b).*"))
+        esHit = false;
+        esKw = {"hola","buenas","gracias","quiero","necesito","cuanto","cuantos","cuesta","precio","cotiz","uniforme","equipo","playera","camiseta","diseno","colores","entrega","pedido","ayuda","gustaria","entonces","tienen","entrega"};
+        for each kw in esKw
+        {
+                if(norm.contains(kw))
+                {
+                        esHit = true;
+                }
+        }
+        enHit = false;
+        enKw = {"hi ","hello","hey","thanks","thank you","want","need","how much","how many","price","quote","jersey","team","please","custom","order","delivery","design","help","the ","you "};
+        for each kw in enKw
+        {
+                if(norm.contains(kw))
+                {
+                        enHit = true;
+                }
+        }
+        if(esHit)
         {
                 curLang = "es";
         }
-        else if(norm.matches(".*(\\bhi\\b|\\bhello\\b|\\bhey\\b|\\bthanks?\\b|\\bthank\\b|\\bwant\\b|\\bneed\\b|\\bhow\\b|\\bmuch\\b|\\bprice\\b|\\bquote\\b|\\bjersey\\b|\\bteam\\b|\\bplease\\b|\\bcustom\\b|\\border\\b|\\bdelivery\\b|\\bdesign\\b|\\bhelp\\b).*"))
+        else if(enHit)
         {
                 curLang = "en";
         }
