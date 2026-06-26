@@ -107,7 +107,7 @@ if(productAnswer != null)
 // El formulario corto del bot NO pide email, lo generamos basado en teléfono
 // para cumplir con el campo obligatorio de CRM.
 // =========================================================================
-phoneDigits = leadPhone.replaceAll("[^0-9]","","ALL");
+phoneDigits = leadPhone.replaceAll("[^0-9]","");
 if(phoneDigits != "")
 {
         leadEmail = "lead-" + phoneDigits + "@kavensports.com";
@@ -471,14 +471,14 @@ zoho.salesiq.visitorsession.set(portalName,capturedFlag);
 // =========================================================================
 // MENSAJE DE CONFIRMACION
 // =========================================================================
-botLang = "es";
-sessLang = zoho.salesiq.visitorsession.get(portalName,"bot_lang");
+botLang = "en";
+sessLang = zoho.salesiq.visitorsession.get(portalName,"lead_lang");
 if(sessLang != null)
 {
         langData = sessLang.get("data");
-        if(langData != null && langData.get("bot_lang") != null)
+        if(langData != null && langData.get("lead_lang") != null)
         {
-                botLang = langData.get("bot_lang").toString();
+                botLang = langData.get("lead_lang").toString();
         }
 }
 

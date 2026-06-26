@@ -3,7 +3,7 @@ input = message.get("text");
 inputText = "";
 if(input != null)
 {
-	inputText = "" + input;
+        inputText = "" + input;
 }
 
 // =========================================================================
@@ -23,10 +23,10 @@ allProducts = {"Standard Jersey","Elite Jersey","Premier Jersey","Standard Bib S
 clickedProduct = "";
 if(inputText.indexOf("Quiero cotizar:") >= 0)
 {
-	clickedProduct = inputText.getSuffix("Quiero cotizar:").trim();
-	prodSess = Map();
-	prodSess.put("lead_clicked_product",clickedProduct);
-	zoho.salesiq.visitorsession.set("jreyesilcmx",prodSess);
+        clickedProduct = inputText.getSuffix("Quiero cotizar:").trim();
+        prodSess = Map();
+        prodSess.put("lead_clicked_product",clickedProduct);
+        zoho.salesiq.visitorsession.set("jreyesilcmx",prodSess);
 }
 
 // Estado de sesion
@@ -34,7 +34,7 @@ captured = "false";
 sess = zoho.salesiq.visitorsession.get("jreyesilcmx","lead_captured");
 if(sess != null && sess.get("data") != null && sess.get("data").get("lead_captured") != null)
 {
-	captured = sess.get("data").get("lead_captured");
+        captured = sess.get("data").get("lead_captured");
 }
 
 // =========================================================================
@@ -54,34 +54,62 @@ norm = norm.trim();
 signalCats = List();
 if(norm.matches(".*(\\bprecio\\b|\\bprice\\b|\\bprices\\b|\\bpricing\\b|per\\s+unit|per\\s+piece|cuanto\\s+cuesta|cost(o|ar|s)?|how\\s+much|quote|cotiz(ar|acion)|\\bbudget\\b|\\$\\s*\\d).*"))
 {
-	signalCats.add("pricing");
+        signalCats.add("pricing");
 }
 if(norm.matches(".*(\\bcuantos\\b|\\bcantidad\\b|minimum\\s+order|minimo\\s+de\\s+(pedido|compra)|moq|how\\s+many|\\bunits?\\b|\\bpieces?\\b|\\bbulk\\b|\\bdozen\\b|\\d{1,6}\\s*(custom\\s+)?(uniforms?|jerseys?|shirts?|kits?|pieces?|units?|sets?|pcs?|players?|team)).*"))
 {
-	signalCats.add("quantity");
+        signalCats.add("quantity");
 }
 if(norm.matches(".*(\\bdiseno\\b|personaliz(ar|ado)|customi[sz]e|custom\\b|logo|colores?|nombre\\s+en\\s+el\\s+uniforme).*"))
 {
-	signalCats.add("customization");
+        signalCats.add("customization");
 }
 if(norm.matches(".*(cuanto\\s+tiempo|\\bentrega\\b|delivery|when\\b|lead\\s*time|tiempo\\s+de\\s+produccion).*"))
 {
-	signalCats.add("timeline");
+        signalCats.add("timeline");
 }
 if(norm.matches(".*(quiero\\s+cotizar|me\\s+interesa|i\\s*(am|'m)\\s+interested|want\\s+a\\s+quote|how\\s+to\\s+order|como\\s+ordeno|quiero\\s+comprar|listo\\s+para\\s+comprar).*"))
 {
-	signalCats.add("direct_interest");
+        signalCats.add("direct_interest");
 }
 collectContact = "false";
 if(signalCats.size() > 0)
 {
-	collectContact = "true";
+        collectContact = "true";
 }
 
 // Guardar senales en sesion para el Context Handler (creacion de lead)
 sigSess = Map();
 sigSess.put("lead_signals",signalCats.toString());
 zoho.salesiq.visitorsession.set("jreyesilcmx",sigSess);
+
+// =========================================================================
+// DETECCION / PERSISTENCIA DE IDIOMA (en/es)
+// El boton de producto envia texto en espanol ("Quiero cotizar:"), por eso
+// ese mensaje NO debe cambiar el idioma del visitante. Solo el texto libre
+// real define el idioma. Por defecto ingles (el saludo del sitio es ingles).
+// =========================================================================
+prevLang = "en";
+langSess = zoho.salesiq.visitorsession.get("jreyesilcmx","lead_lang");
+if(langSess != null && langSess.get("data") != null && langSess.get("data").get("lead_lang") != null)
+{
+        prevLang = langSess.get("data").get("lead_lang");
+}
+curLang = prevLang;
+if(clickedProduct == "")
+{
+        if(norm.matches(".*(\\bhola\\b|\\bbuenas\\b|\\bgracias\\b|\\bquiero\\b|\\bnecesito\\b|\\bcuanto\\b|\\bcuantos\\b|\\bcuesta\\b|\\bprecio\\b|cotiz|uniforme|\\bequipo\\b|playera|camiseta|\\bdiseno\\b|\\bcolores\\b|\\bentrega\\b|\\bpedido\\b|\\bayuda\\b|\\bpara\\b|\\bgustaria\\b).*"))
+        {
+                curLang = "es";
+        }
+        else if(norm.matches(".*(\\bhi\\b|\\bhello\\b|\\bhey\\b|\\bthanks?\\b|\\bthank\\b|\\bwant\\b|\\bneed\\b|\\bhow\\b|\\bmuch\\b|\\bprice\\b|\\bquote\\b|\\bjersey\\b|\\bteam\\b|\\bplease\\b|\\bcustom\\b|\\border\\b|\\bdelivery\\b|\\bdesign\\b|\\bhelp\\b).*"))
+        {
+                curLang = "en";
+        }
+}
+langStore = Map();
+langStore.put("lead_lang",curLang);
+zoho.salesiq.visitorsession.set("jreyesilcmx",langStore);
 
 // =========================================================================
 // LLAMADA A OPENAI (NATIVA - invokeurl + Connection segura)
@@ -186,40 +214,47 @@ hdr.put("Content-Type","application/json");
 reply = "";
 try
 {
-	aiResp = invokeurl
-	[
-		url :"https://api.openai.com/v1/chat/completions"
-		type :POST
-		parameters:bodyMap.toString()
-		headers:hdr
-		connection:"openai_kaven"
-	];
-	aiMap = aiResp.toMap();
-	choices = aiMap.get("choices");
-	if(choices != null && choices.size() > 0)
-	{
-		firstChoice = choices.get(0);
-		msgObj = firstChoice.get("message");
-		if(msgObj != null)
-		{
-			reply = msgObj.get("content");
-		}
-	}
+        aiResp = invokeurl
+        [
+                url :"https://api.openai.com/v1/chat/completions"
+                type :POST
+                parameters:bodyMap.toString()
+                headers:hdr
+                connection:"openai_kaven"
+        ];
+        aiMap = aiResp.toMap();
+        choices = aiMap.get("choices");
+        if(choices != null && choices.size() > 0)
+        {
+                firstChoice = choices.get(0);
+                msgObj = firstChoice.get("message");
+                if(msgObj != null)
+                {
+                        reply = msgObj.get("content");
+                }
+        }
 }
 catch (e)
 {
-	reply = "";
+        reply = "";
 }
 if(reply == null || reply == "")
 {
-	reply = "Gracias por escribir a Kaven Sports. Cuentame que deporte y cuantos uniformes necesitas y con gusto te ayudo con una cotizacion.";
+        if(curLang == "es")
+        {
+                reply = "Gracias por escribir a Kaven Sports. Cuentame que deporte y cuantos uniformes necesitas y con gusto te ayudo con una cotizacion.";
+        }
+        else
+        {
+                reply = "Thanks for reaching out to Kaven Sports! Tell me which sport and how many uniforms you need, and I'll gladly help you with a quote.";
+        }
 }
 reply = reply + "\n\n👉 https://kavensports.com";
 
 // Si el visitante hizo clic en un boton de producto, forzar captura
 if(clickedProduct != "")
 {
-	collectContact = "true";
+        collectContact = "true";
 }
 
 // =========================================================================
@@ -227,26 +262,47 @@ if(clickedProduct != "")
 // =========================================================================
 if(captured != "true" && collectContact == "true")
 {
-	response.put("action","context");
-	response.put("context_id","lead_details");
-	questions = Collection();
-	q0 = {"name":"phone","replies":{{"text":"Perfecto! Para enviarte la cotizacion por WhatsApp, cual es tu numero?","field_name":"siq_phone"}},"input":{"type":"tel","placeholder":"+52 664 123 4567","error":{"Ingresa un numero valido"}}};
-	questions.insert(q0);
-	q1 = {"name":"name","replies":{{"text":"Gracias! Y tu nombre es...?","field_name":"siq_name"}},"input":{"type":"name","placeholder":"Tu nombre completo"}};
-	questions.insert(q1);
-	if(clickedProduct == "" || !allProducts.contains(clickedProduct))
-	{
-		prodOptions = List();
-		for each p in allProducts
-		{
-			prodOptions.add(p);
-		}
-		prodOptions.add("Aun no estoy seguro");
-		q2 = {"name":"products","replies":{{"text":"Que producto te interesa cotizar? (puedes elegir uno o varios)"}},"input":{"type":"multiple-select","options":prodOptions,"min_selection":"1"}};
-		questions.insert(q2);
-	}
-	response.put("questions",questions);
-	return response;
+        response.put("action","context");
+        response.put("context_id","lead_details");
+        questions = Collection();
+        if(curLang == "es")
+        {
+                q0 = {"name":"phone","replies":{{"text":"Perfecto! Para enviarte la cotizacion por WhatsApp, cual es tu numero?","field_name":"siq_phone"}},"input":{"type":"tel","placeholder":"+52 664 123 4567","error":{"Ingresa un numero valido"}}};
+                questions.insert(q0);
+                q1 = {"name":"name","replies":{{"text":"Gracias! Y tu nombre es...?","field_name":"siq_name"}},"input":{"type":"name","placeholder":"Tu nombre completo"}};
+                questions.insert(q1);
+                if(clickedProduct == "" || !allProducts.contains(clickedProduct))
+                {
+                        prodOptions = List();
+                        for each p in allProducts
+                        {
+                                prodOptions.add(p);
+                        }
+                        prodOptions.add("Aun no estoy seguro");
+                        q2 = {"name":"products","replies":{{"text":"Que producto te interesa cotizar? (puedes elegir uno o varios)"}},"input":{"type":"multiple-select","options":prodOptions,"min_selection":"1"}};
+                        questions.insert(q2);
+                }
+        }
+        else
+        {
+                q0 = {"name":"phone","replies":{{"text":"Great! To send your quote via WhatsApp, what's your phone number?","field_name":"siq_phone"}},"input":{"type":"tel","placeholder":"+1 619 123 4567","error":{"Please enter a valid number"}}};
+                questions.insert(q0);
+                q1 = {"name":"name","replies":{{"text":"Thanks! And your name is...?","field_name":"siq_name"}},"input":{"type":"name","placeholder":"Your full name"}};
+                questions.insert(q1);
+                if(clickedProduct == "" || !allProducts.contains(clickedProduct))
+                {
+                        prodOptions = List();
+                        for each p in allProducts
+                        {
+                                prodOptions.add(p);
+                        }
+                        prodOptions.add("Not sure yet");
+                        q2 = {"name":"products","replies":{{"text":"Which product would you like a quote for? (you can pick one or more)"}},"input":{"type":"multiple-select","options":prodOptions,"min_selection":"1"}};
+                        questions.insert(q2);
+                }
+        }
+        response.put("questions",questions);
+        return response;
 }
 
 response.put("action","reply");
