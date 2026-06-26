@@ -92,10 +92,25 @@ leadName = answers.get("name").get("text");
 leadPhone = answers.get("phone").get("text");
 
 // --- Email es OPCIONAL en el formulario corto ---
+// Si no se proporciona, generamos un placeholder basado en el telefono
+// para cumplir con el campo obligatorio de Zoho CRM.
 leadEmail = "";
 if(answers.get("email") != null)
 {
         leadEmail = answers.get("email").get("text");
+}
+if(leadEmail == "" || leadEmail == null)
+{
+        // Generar email placeholder: lead-6641234567@kavensports.com
+        phoneDigits = leadPhone.replaceAll("[^0-9]","","ALL");
+        if(phoneDigits != "")
+        {
+                leadEmail = "lead-" + phoneDigits + "@kavensports.com";
+        }
+        else
+        {
+                leadEmail = "lead-" + zoho.currenttime.toLong() + "@kavensports.com";
+        }
 }
 
 // --- Campos opcionales del formulario (pueden no existir) ---
