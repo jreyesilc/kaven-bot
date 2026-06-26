@@ -506,6 +506,9 @@ else
         }
 }
 
+// DEBUG TEMPORAL - quitar tras diagnostico
+confirmation = confirmation + "\n\n[DEBUG crmOk=" + crmOk + " | dup=" + isDuplicate + " | product='" + productList + "' | info=" + debugInfo + "]";
+
 response.put("action","reply");
 response.put("replies",{confirmation});
 return response;
