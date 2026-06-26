@@ -403,6 +403,10 @@ else
                 teamClubName = "Por confirmar (" + productList + ")";
         }
         leadMap.put("Team_Club_Name",teamClubName);
+        // Otros campos obligatorios del layout "Sports Leads" (placeholders; el bot no los pide)
+        leadMap.put("City","Por confirmar");
+        leadMap.put("State","Por confirmar");
+        leadMap.put("Country","Por confirmar");
         
         // Layout Sports Leads
         layoutMap = Map();
