@@ -221,11 +221,20 @@ if(sessRaw != null)
 // Si existe: actualizar con merge de señales
 // Si no existe: crear nuevo
 // =========================================================================
-existingLeads = zoho.crm.searchRecords("Leads","(Email:equals:" + leadEmail + ")");
 crmId = "";
 crmOk = "false";
 isDuplicate = "false";
 debugInfo = "";
+searchTrace = "pre_search";
+existingLeads = zoho.crm.searchRecords("Leads","(Email:equals:" + leadEmail + ")");
+if(existingLeads != null)
+{
+        searchTrace = "post_search_size=" + existingLeads.size();
+}
+else
+{
+        searchTrace = "post_search_null";
+}
 
 if(existingLeads != null && existingLeads.size() > 0)
 {
@@ -441,6 +450,7 @@ else
         }
 }
 
+searchTrace = searchTrace + "|branch_done|crmId=" + crmId + "|crmOk=" + crmOk;
 // =========================================================================
 // CAPA 5: MARCAR COMO CREADO (estado seguro)
 // =========================================================================
@@ -507,7 +517,7 @@ else
 }
 
 // DEBUG TEMPORAL - quitar tras diagnostico
-confirmation = confirmation + "\n\n[DEBUG crmOk=" + crmOk + " | dup=" + isDuplicate + " | product='" + productList + "' | info=" + debugInfo + "]";
+confirmation = confirmation + "\n\n[DEBUG crmOk=" + crmOk + " | dup=" + isDuplicate + " | product='" + productList + "' | info=" + debugInfo + " | trace=" + searchTrace + "]";
 
 response.put("action","reply");
 response.put("replies",{confirmation});
