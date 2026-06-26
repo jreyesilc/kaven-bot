@@ -90,8 +90,8 @@ zoho.salesiq.visitorsession.set(portalName,lockMap);
 leadPhone = answers.get("phone").get("text");
 leadName = answers.get("name").get("text");
 
-// Producto seleccionado (multiselect)
-productAnswer = answers.get("product");
+// Producto seleccionado (multiselect) - la pregunta se llama "products" (plural) en el Message Handler
+productAnswer = answers.get("products");
 productList = "";
 if(productAnswer != null)
 {
@@ -396,6 +396,13 @@ else
         leadMap.put("Description",description);
         leadMap.put("Lead_Source","Bot SalesIQ");
         leadMap.put("Company","Kaven Sports - Cliente Potencial");
+        // Campo obligatorio del layout "Sports Leads" (el bot no lo pide; placeholder para el rep)
+        teamClubName = "Por confirmar";
+        if(productList != "" && productList != "No especificado")
+        {
+                teamClubName = "Por confirmar (" + productList + ")";
+        }
+        leadMap.put("Team_Club_Name",teamClubName);
         
         // Layout Sports Leads
         layoutMap = Map();
