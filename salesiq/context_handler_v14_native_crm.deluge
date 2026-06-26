@@ -225,16 +225,7 @@ crmId = "";
 crmOk = "false";
 isDuplicate = "false";
 debugInfo = "";
-searchTrace = "pre_search";
 existingLeads = zoho.crm.searchRecords("Leads","(Email:equals:" + leadEmail + ")");
-if(existingLeads != null)
-{
-        searchTrace = "post_search_size=" + existingLeads.size();
-}
-else
-{
-        searchTrace = "post_search_null";
-}
 
 if(existingLeads != null && existingLeads.size() > 0)
 {
@@ -313,50 +304,42 @@ if(existingLeads != null && existingLeads.size() > 0)
                 }
         }
         
-        // Actualizar lead existente
-        try 
+        // Actualizar lead existente (sin try/catch: Deluge aisla el scope de variables dentro de try)
+        updateMap = Map();
+        updateMap.put("id",existingId);
+        if(mergedLabels.size() > 0)
         {
-                updateMap = Map();
-                updateMap.put("id",existingId);
-                if(mergedLabels.size() > 0)
+                updateMap.put("Se_ales_de_Compra",mergedLabels);
+        }
+        if(leadPhone != "" && leadPhone != null)
+        {
+                updateMap.put("Phone",leadPhone);
+        }
+        if(rawMessage != "")
+        {
+                // Agregar nuevo mensaje a la descripción existente
+                existingDesc = existingLead.get("Description");
+                if(existingDesc != null && existingDesc.toString() != "")
                 {
-                        updateMap.put("Se_ales_de_Compra",mergedLabels);
-                }
-                if(leadPhone != "" && leadPhone != null)
-                {
-                        updateMap.put("Phone",leadPhone);
-                }
-                if(rawMessage != "")
-                {
-                        // Agregar nuevo mensaje a la descripción existente
-                        existingDesc = existingLead.get("Description");
-                        if(existingDesc != null && existingDesc.toString() != "")
-                        {
-                                updateMap.put("Description",existingDesc.toString() + " | " + rawMessage);
-                        }
-                        else
-                        {
-                                updateMap.put("Description",rawMessage);
-                        }
-                }
-                
-                updateResp = zoho.crm.updateRecord("Leads",existingId,updateMap);
-                
-                if(updateResp != null)
-                {
-                        crmOk = "true";
-                        debugInfo = "Lead existente actualizado: " + existingId + " | Señales merged: " + mergedLabels.size();
+                        updateMap.put("Description",existingDesc.toString() + " | " + rawMessage);
                 }
                 else
                 {
-                        crmOk = "false";
-                        debugInfo = "updateRecord devolvió null";
+                        updateMap.put("Description",rawMessage);
                 }
         }
-        catch (e)
+        
+        updateResp = zoho.crm.updateRecord("Leads",existingId,updateMap);
+        
+        if(updateResp != null && updateResp.get("id") != null)
+        {
+                crmOk = "true";
+                debugInfo = "Lead existente actualizado: " + existingId + " | Señales merged: " + mergedLabels.size();
+        }
+        else
         {
                 crmOk = "false";
-                debugInfo = "Error actualizando lead: " + e.toString();
+                debugInfo = "updateRecord falló: " + updateResp;
         }
 }
 else
@@ -429,7 +412,6 @@ else
         }
 }
 
-searchTrace = searchTrace + "|branch_done|crmId=" + crmId + "|crmOk=" + crmOk;
 // =========================================================================
 // CAPA 5: MARCAR COMO CREADO (estado seguro)
 // =========================================================================
@@ -494,9 +476,6 @@ else
                 confirmation = "Done, " + leadName + "! Your information has been registered. We will contact you soon via WhatsApp at " + leadPhone + " to help with your custom uniform quote.";
         }
 }
-
-// DEBUG TEMPORAL - quitar tras diagnostico
-confirmation = confirmation + "\n\n[DEBUG crmOk=" + crmOk + " | dup=" + isDuplicate + " | product='" + productList + "' | info=" + debugInfo + " | trace=" + searchTrace + "]";
 
 response.put("action","reply");
 response.put("replies",{confirmation});
