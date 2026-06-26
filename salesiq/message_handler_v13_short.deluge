@@ -1,0 +1,126 @@
+response = Map();
+
+input = message.get("text");
+inputText = "";
+if(input != null)
+{
+        inputText = "" + input;
+}
+
+// =========================================================================
+// MESSAGE HANDLER v13 - FORMULARIO CORTO (optimizado para móvil)
+// =========================================================================
+// CAMBIO PRINCIPAL: Reducido de 7 a 2-3 campos para maximizar conversión:
+//   1. WhatsApp/Teléfono (más fácil en móvil, con autocompletar)
+//   2. Nombre
+//   3. Producto (solo si NO viene del botón de la landing)
+//
+// ELIMINADOS (el vendedor los pregunta después por WhatsApp):
+//   - Email (no crítico)
+//   - Cantidad, fecha de entrega, diseño (detalles secundarios)
+//
+// RESULTADO ESPERADO: +40-60% conversión en móvil
+// =========================================================================
+
+// ---------------------------------------------------------------
+// Productos del catalogo de ciclismo (botones "Get a quote")
+// ---------------------------------------------------------------
+allProducts = {"Standard Jersey","Elite Jersey","Premier Jersey","Standard Bib Short","Elite Bib Short","Premier Bib Short"};
+
+// Detectar el producto seleccionado en la landing.
+// La landing abre el chat con un primer mensaje: "Quiero cotizar: <producto>"
+clickedProduct = "";
+if(inputText.indexOf("Quiero cotizar:") >= 0)
+{
+        clickedProduct = inputText.getSuffix("Quiero cotizar:").trim();
+        // Guardar el producto en la sesion para el Context Handler
+        prodSess = Map();
+        prodSess.put("lead_clicked_product",clickedProduct);
+        zoho.salesiq.visitorsession.set("jreyesilcmx",prodSess);
+}
+
+// Estado de sesión
+captured = "false";
+sess = zoho.salesiq.visitorsession.get("jreyesilcmx","lead_captured");
+if(sess != null && sess.get("data") != null && sess.get("data").get("lead_captured") != null)
+{
+        captured = sess.get("data").get("lead_captured");
+}
+
+// Llamada al backend IA (Render)
+postBody = Map();
+postBody.put("message",inputText);
+headerMap = Map();
+headerMap.put("Content-Type","application/json");
+resp = invokeurl
+[
+        url :"https://kaven-bot.onrender.com/chat"
+        type :POST
+        parameters:postBody.toString()
+        headers:headerMap
+];
+
+respMap = resp.toMap();
+reply = respMap.get("response");
+if(reply == null || reply == "")
+{
+        reply = respMap.get("reply");
+}
+if(reply == null || reply == "")
+{
+        reply = "Gracias por escribir a Kaven Sports. Cuentame que deporte y cuantos uniformes necesitas y con gusto te ayudo con una cotizacion. https://kavensports.com";
+}
+
+// Bandera inteligente del backend
+collectContact = "false";
+collectFlag = respMap.get("collect_contact");
+if(collectFlag != null)
+{
+        collectContact = ("" + collectFlag).toLowerCase();
+}
+
+// Si el visitante hizo clic en un boton de producto, forzamos la captura
+// del formulario de cotizacion aunque el backend no marque collect_contact.
+if(clickedProduct != "")
+{
+        collectContact = "true";
+}
+
+// =========================================================================
+// FORMULARIO CORTO (2-3 preguntas máximo)
+// =========================================================================
+if(captured != "true" && collectContact == "true")
+{
+        response.put("action","context");
+        response.put("context_id","lead_details");
+
+        questions = Collection();
+
+        // ----- Q0: WhatsApp/Teléfono (PRIMER CAMPO - más fácil en móvil) -----
+        q0 = {"name":"phone","replies":{{"text":"Perfecto! Para enviarte la cotizacion por WhatsApp, cual es tu numero?","field_name":"siq_phone"}},"input":{"type":"tel","placeholder":"+52 664 123 4567","error":{"Ingresa un numero valido"}}};
+        questions.insert(q0);
+
+        // ----- Q1: Nombre -----
+        q1 = {"name":"name","replies":{{"text":"Gracias! Y tu nombre es...?","field_name":"siq_name"}},"input":{"type":"name","placeholder":"Tu nombre completo"}};
+        questions.insert(q1);
+
+        // ----- Q2: Producto (SOLO si NO viene del botón de la landing) -----
+        if(clickedProduct == "" || !allProducts.contains(clickedProduct))
+        {
+                prodOptions = List();
+                for each p in allProducts
+                {
+                        prodOptions.add(p);
+                }
+                prodOptions.add("Aun no estoy seguro");
+                q2 = {"name":"products","replies":{{"text":"Que producto te interesa cotizar? (puedes elegir uno o varios)"}},"input":{"type":"multiple-select","options":prodOptions,"min_selection":"1"}};
+                questions.insert(q2);
+        }
+
+        response.put("questions",questions);
+        return response;
+}
+
+response.put("action","reply");
+response.put("replies",{reply});
+return response;

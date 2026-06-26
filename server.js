@@ -523,11 +523,19 @@ async function crearLeadCompleto({ name, email, phone, signals, message, uniform
     lastName = fullName.substring(spaceIdx + 1).trim();
   }
 
+  // ✅ FORMULARIO CORTO v13: Email puede ser opcional en el bot
+  // Si no se proporciona, usamos un placeholder con el telefono para cumplir
+  // con el campo obligatorio de Zoho CRM sin perder el lead.
+  const phoneClean = (phone || "").toString().trim().replace(/[^0-9]/g, "");
+  const emailFinal = email && email.trim() 
+    ? email.trim() 
+    : (phoneClean ? `lead-${phoneClean}@kavensports.com` : `lead-${Date.now()}@kavensports.com`);
+
   const record = {
     First_Name: firstName,
     Last_Name: lastName || firstName,
     Contact_Name: fullName,
-    Email: email || "",
+    Email: emailFinal,
     Phone: phone || "",
     Company: "Kaven Sports - Web Chat",
     Lead_Source: "Chatbot - SalesIQ",
