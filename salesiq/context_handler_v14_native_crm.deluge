@@ -387,66 +387,34 @@ else
                 description = description + " | Productos: " + productList;
         }
         
-        // Construir registro para CRM
-        try 
+        // Construir registro para CRM (SIN try/catch: Deluge aisla variables dentro de try)
+        leadMap = Map();
+        leadMap.put("First_Name",firstName);
+        leadMap.put("Last_Name",lastName);
+        leadMap.put("Email",leadEmail);
+        leadMap.put("Phone",leadPhone);
+        leadMap.put("Description",description);
+        leadMap.put("Lead_Source","Bot SalesIQ");
+        leadMap.put("Company","Kaven Sports - Cliente Potencial");
+        
+        // Layout Sports Leads
+        layoutMap = Map();
+        layoutMap.put("id",layoutId);
+        leadMap.put("Layout",layoutMap);
+        
+        // Señales de compra (si hay)
+        if(labelsList.size() > 0)
         {
-                leadMap = Map();
-                leadMap.put("First_Name",firstName);
-                leadMap.put("Last_Name",lastName);
-                leadMap.put("Email",leadEmail);
-                leadMap.put("Phone",leadPhone);
-                leadMap.put("Description",description);
-                leadMap.put("Lead_Source","Bot SalesIQ");
-                leadMap.put("Company","Kaven Sports - Cliente Potencial");
-                
-                // Layout Sports Leads
-                layoutMap = Map();
-                layoutMap.put("id",layoutId);
-                leadMap.put("Layout",layoutMap);
-                
-                // Señales de compra (si hay)
-                if(labelsList.size() > 0)
-                {
-                        leadMap.put("Se_ales_de_Compra",labelsList);
-                }
-                
-                createResp = zoho.crm.createRecord("Leads",leadMap);
-                
-                if(createResp != null)
-                {
-                        // Extraer ID del lead creado
-                        if(createResp.get("id") != null)
-                        {
-                                crmId = createResp.get("id").toString();
-                                crmOk = "true";
-                                debugInfo = "Lead creado: " + crmId + " | Señales: " + labelsList.size();
-                        }
-                        else if(createResp.get("details") != null)
-                        {
-                                details = createResp.get("details");
-                                if(details.get("id") != null)
-                                {
-                                        crmId = details.get("id").toString();
-                                        crmOk = "true";
-                                        debugInfo = "Lead creado (details): " + crmId;
-                                }
-                        }
-                        else
-                        {
-                                crmOk = "false";
-                                debugInfo = "createRecord OK pero sin ID: " + createResp.toString();
-                        }
-                }
-                else
-                {
-                        crmOk = "false";
-                        debugInfo = "createRecord devolvió null";
-                }
+                leadMap.put("Se_ales_de_Compra",labelsList);
         }
-        catch (e)
+        
+        createResp = zoho.crm.createRecord("Leads",leadMap);
+        debugInfo = "createResp=" + createResp;
+        
+        if(createResp != null && createResp.get("id") != null)
         {
-                crmOk = "false";
-                debugInfo = "Error creando lead: " + e.toString();
+                crmId = createResp.get("id").toString();
+                crmOk = "true";
         }
 }
 
