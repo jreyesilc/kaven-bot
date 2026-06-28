@@ -1,0 +1,68 @@
+// =========================================================================
+// RAG INTEGRATION — v15 (para el Message Handler nativo del bot Kaven)
+// =========================================================================
+// QUÉ HACE:
+//   Antes de llamar a OpenAI, el handler pide al backend (Render) los
+//   ejemplos de conversaciones reales más parecidos a lo que escribió el
+//   cliente, y los concatena al system prompt. Así el bot "aprende" de las
+//   conversaciones igual que la IA de Meta, pero manteniendo control total.
+//
+// CÓMO INTEGRARLO en message_handler_v14_native_openai.deluge:
+//   1) Pega el BLOQUE A justo DESPUÉS de terminar de construir `systemPrompt`
+//      (después de la última línea `systemPrompt = systemPrompt + "...";`)
+//      y ANTES de armar la lista `msgs`.
+//   2) No cambies tu llamada a OpenAI: sigue siendo nativa con tu Connection.
+//   3) Asegúrate de que el backend Render esté encendido (server.js) con la
+//      ruta POST /rag/context disponible.
+// =========================================================================
+
+// ----------------------- BLOQUE A: recuperar contexto RAG -----------------
+ragContext = "";
+try
+{
+    ragBody = Map();
+    ragBody.put("message", inputText);   // inputText = mensaje del cliente
+
+    ragResp = invokeurl
+    [
+        url    : "https://kaven-bot.onrender.com/rag/context"
+        type   : POST
+        parameters : ragBody.toString()
+        headers: {"Content-Type":"application/json"}
+    ];
+
+    // ragResp puede venir como Map o como texto JSON, lo normalizamos
+    if(ragResp != null)
+    {
+        ragMap = ragResp;
+        if(typeof(ragResp) == "string")
+        {
+            ragMap = ragResp.toMap();
+        }
+        if(ragMap != null && ragMap.get("context") != null)
+        {
+            ragContext = ragMap.get("context");
+        }
+    }
+}
+catch (e)
+{
+    // Si el RAG falla por cualquier razón, el bot sigue normal sin ejemplos.
+    ragContext = "";
+}
+
+// Inyecta los ejemplos recuperados al final del system prompt.
+if(ragContext != null && ragContext != "")
+{
+    systemPrompt = systemPrompt + ragContext;
+}
+// ----------------------- FIN BLOQUE A -------------------------------------
+
+
+// A partir de aquí TODO sigue igual que en tu handler v14:
+// msgs = List();
+// sysMsg = Map();
+// sysMsg.put("role","system");
+// sysMsg.put("content", systemPrompt);   // <-- ya incluye los ejemplos RAG
+// msgs.add(sysMsg);
+// ... (resto idéntico)

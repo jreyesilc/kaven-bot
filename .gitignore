@@ -1,0 +1,10 @@
+# Dependencias
+node_modules/
+package-lock.json
+
+# RAG: caché de embeddings (se regenera automáticamente en cada arranque)
+rag/embeddings_cache.json
+
+# Entorno
+.env
+*.log

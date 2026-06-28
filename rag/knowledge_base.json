@@ -1,0 +1,171 @@
+[
+  {
+    "id": "kb-001",
+    "lang": "es",
+    "sport": "ciclismo",
+    "tags": [
+      "catalogo",
+      "personalizado",
+      "modelos"
+    ],
+    "outcome": "positivo",
+    "user": "Hola, tienen catalogo de modelos ya hechos o todo es personalizado?",
+    "assistant": "¡Hola! Gracias por escribirnos 🚴 En Kaven Sports todo es 100% personalizado y fabricado a la medida: no manejamos stock prearmado. Eso es justo nuestra fortaleza, porque tú eliges colores, diseño, nombres, números y logos sin costo extra. Para que veas estilos y cortes de referencia, te comparto nuestro catálogo de ciclismo: https://www.kavensports.com/files/info/Catalogo_Ciclismo.pdf ¿Para qué disciplina o uso lo necesitas?",
+    "note": "Cliente confunde catalogo con stock. Aclarar que todo es custom y enmarcar como ventaja."
+  },
+  {
+    "id": "kb-002",
+    "lang": "en",
+    "sport": "cycling",
+    "tags": [
+      "catalog",
+      "custom",
+      "ready-made"
+    ],
+    "outcome": "positivo",
+    "user": "Do you have ready-made jerseys or is everything custom?",
+    "assistant": "Hi! Thanks for reaching out 🚴 At Kaven Sports everything is 100% custom-made to order — we don't carry pre-made stock. That's actually our strength: you pick the colors, design, names, numbers and logos at no extra cost. Here's our cycling catalog so you can see styles and cuts for reference: https://www.kavensports.com/files/info/Catalogo_Ciclismo.pdf What kind of riding is it for?",
+    "note": "Customer confuses catalog with stock. Clarify everything is custom and frame as an advantage."
+  },
+  {
+    "id": "kb-003",
+    "lang": "es",
+    "sport": "ciclismo",
+    "tags": [
+      "pieza-unica",
+      "muestra",
+      "minimo"
+    ],
+    "outcome": "positivo",
+    "user": "Solo quiero un jersey para mi, se puede o tienen minimo de piezas?",
+    "assistant": "¡Claro que sí! 😊 No tenemos mínimo de orden, así que puedes pedir una sola pieza sin problema. De hecho es una excelente forma de revisar nuestra calidad de primera mano antes de un pedido para todo el equipo. ¿Ya tienes un diseño en mente o te ayudamos a crearlo desde cero?",
+    "note": "Pedidos de una pieza son comunes. Reaccionar positivo, recordar que no hay minimo, invitar a diseno."
+  },
+  {
+    "id": "kb-004",
+    "lang": "en",
+    "sport": "cycling",
+    "tags": [
+      "single-piece",
+      "sample",
+      "minimum"
+    ],
+    "outcome": "positivo",
+    "user": "Can I order just one jersey for myself or is there a minimum?",
+    "assistant": "Absolutely! 😊 There's no minimum order, so a single piece is totally fine. It's actually a great way to check our quality first-hand before ordering for the whole team. Do you already have a design in mind, or would you like us to create one for you from scratch?",
+    "note": "Single-piece orders are common. React positively, remind no minimum, invite to design."
+  },
+  {
+    "id": "kb-005",
+    "lang": "es",
+    "sport": "general",
+    "tags": [
+      "diseno",
+      "logo",
+      "ayuda-diseno"
+    ],
+    "outcome": "positivo",
+    "user": "Necesito uniformes pero no tengo diseno, solo tengo el logo del equipo",
+    "assistant": "¡Perfecto, con eso tenemos un gran punto de partida! 🎨 Nuestro equipo de diseñadores puede crear el diseño completo del uniforme alrededor de tu logo, totalmente gratis y sin límite de revisiones. Para aclarar y avanzar más rápido: ¿quieres que diseñemos todo el uniforme desde cero usando tu logo, o ya tienes una idea de colores y estilo que quieres que respetemos?",
+    "note": "Distinguir DISENO (layout completo) vs LOGO (marca). Ofrecer diseno gratis y aclarar el alcance."
+  },
+  {
+    "id": "kb-006",
+    "lang": "en",
+    "sport": "general",
+    "tags": [
+      "design",
+      "logo",
+      "design-help"
+    ],
+    "outcome": "positivo",
+    "user": "I need uniforms but I don't have a design, I only have my team logo",
+    "assistant": "Perfect, that's a great starting point! 🎨 Our design team can build the full uniform design around your logo — completely free and with unlimited revisions. To move faster, just to clarify: would you like us to design the whole uniform from scratch using your logo, or do you already have colors and a style in mind you'd like us to follow?",
+    "note": "Distinguish DESIGN (full layout) vs LOGO (mark). Offer free design and clarify scope."
+  },
+  {
+    "id": "kb-007",
+    "lang": "es",
+    "sport": "ciclismo",
+    "tags": [
+      "gamas",
+      "standard",
+      "elite",
+      "premiere",
+      "comparar"
+    ],
+    "outcome": "positivo",
+    "user": "Cual es la diferencia entre las gamas? no se cual elegir",
+    "assistant": "¡Buena pregunta! Te explico rápido para ayudarte a elegir la mejor para ti 🚴\n\n• Standard: excelente equilibrio de comodidad y durabilidad. Ideal para entrenamiento y rodadas recreativas.\n• Elite: ajuste optimizado y mejor transpirabilidad. Para un rendimiento superior en rutas más exigentes.\n• Premiere: nuestra gama tope, con ingeniería aerodinámica avanzada y materiales ultraligeros. Diseñada para competencia de alto nivel.\n\n¿Tu uso es más entrenamiento/recreativo o competencia? Con eso te recomiendo la ideal y preparamos tu cotización.",
+    "note": "Explicar las 3 gamas consultivamente y ayudar a elegir segun uso antes de cotizar."
+  },
+  {
+    "id": "kb-008",
+    "lang": "es",
+    "sport": "general",
+    "tags": [
+      "re-enganche",
+      "silencio",
+      "seguimiento"
+    ],
+    "outcome": "reactivacion",
+    "user": "[el cliente quedo en silencio varios dias despues de pedir un diseno]",
+    "assistant": "¡Hola, [nombre]! Una disculpa por la demora 😊 Aquí seguimos contigo para terminar tu diseño y avanzar con tu cotización cuando gustes. ¿Te parece si retomamos? Puedo enviarte una primera propuesta de diseño o, si prefieres, afinamos los detalles que tengas en mente. Sin ninguna prisa, cuando estés listo.",
+    "note": "Re-enganche calido tras silencio, disculpa breve, paso concreto, cero presion."
+  },
+  {
+    "id": "kb-009",
+    "lang": "es",
+    "sport": "general",
+    "tags": [
+      "ubicacion",
+      "direccion"
+    ],
+    "outcome": "positivo",
+    "user": "Donde estan ubicados?",
+    "assistant": "¡Con gusto! Tenemos presencia en Baja California y en la Ciudad de México, y enviamos a donde lo necesites 😊 ¿Te gustaría que coordinemos los detalles de envío junto con tu cotización?",
+    "note": "ES: mencionar Baja California y CDMX. Nunca dar direccion exacta (calle, numero, CP)."
+  },
+  {
+    "id": "kb-010",
+    "lang": "en",
+    "sport": "general",
+    "tags": [
+      "location",
+      "address"
+    ],
+    "outcome": "positivo",
+    "user": "Where are you located?",
+    "assistant": "Happy to help! We're based in San Diego and we ship wherever you need 😊 Would you like us to coordinate shipping details together with your quote?",
+    "note": "EN: mention San Diego. Never give an exact street address, number or postal code."
+  },
+  {
+    "id": "kb-011",
+    "lang": "es",
+    "sport": "futbol",
+    "tags": [
+      "soccer",
+      "futbol",
+      "productos",
+      "no-gamas"
+    ],
+    "outcome": "positivo",
+    "user": "Hacen uniformes de futbol? que opciones tienen?",
+    "assistant": "¡Sí, claro! ⚽ Para fútbol manejamos una sola calidad premium, 100% sublimada, con tela Dryfit antibacterial y protección UV. Las prendas disponibles son:\n• Jersey (con cuello redondo o cuello V)\n• Shorts\n• Medias\n• Kit completo (jersey + shorts + medias)\n\nTodo es personalizado: colores, nombres, números y logos sin costo extra. ¿Para cuántas personas sería y ya tienes diseño o te ayudamos a crearlo?",
+    "note": "Futbol tiene calidad unica (NO gamas Standard/Elite/Premiere). No mencionar ciclismo."
+  },
+  {
+    "id": "kb-012",
+    "lang": "es",
+    "sport": "ciclismo",
+    "tags": [
+      "precio",
+      "cotizacion",
+      "datos-contacto"
+    ],
+    "outcome": "lead",
+    "user": "Cuanto cuesta un kit de ciclismo?",
+    "assistant": "¡Con gusto te preparo una cotización exacta! 🚴 El precio final depende de la gama (Standard, Elite o Premiere), la cantidad y los detalles del diseño. Para enviártela personalizada, compárteme por favor: ¿para cuántas personas?, ¿para cuándo lo necesitas? y ¿ya tienes diseño o te ayudamos? Con eso (y tu nombre, WhatsApp y correo) nuestro equipo te manda la cotización formal.",
+    "note": "No dar precio directo. Cualificar (gama, cantidad, fecha, diseno) y pedir datos de contacto."
+  }
+]

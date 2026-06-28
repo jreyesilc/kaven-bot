@@ -2,6 +2,7 @@ const express = require("express");
 const axios = require("axios");
 const OpenAI = require("openai");
 const cors = require("cors");
+const rag = require("./rag/rag");
 
 const app = express();
 app.use(express.json());
@@ -794,7 +795,32 @@ app.post("/chat", async (req, res) => {
         // de Meta. Si no hay historial con roles, usamos el contexto plano.
         const roleMessages = getConversationMessages(req.body).slice(-10);
 
-        const chatMessages = [{ role: "system", content: systemPrompt }];
+        // ✅ RAG: busca conversaciones reales parecidas y las inyecta en el prompt
+        // para que el bot responda siguiendo patrones que ya funcionaron.
+        let ragBlock = "";
+        try {
+          const ragQuery =
+            message ||
+            (roleMessages.length > 0
+              ? roleMessages[roleMessages.length - 1].content
+              : "");
+          if (ragQuery && ragQuery.trim()) {
+            const lang = rag.detectLang(ragQuery);
+            const results = await rag.retrieve(ragQuery, { topK: 3, lang });
+            ragBlock = rag.buildContextBlock(results);
+            if (results.length > 0) {
+              console.log(
+                `🔎 RAG: ${results.length} ejemplos inyectados (top score ${results[0].score.toFixed(2)})`
+              );
+            }
+          }
+        } catch (ragErr) {
+          console.log("⚠️ RAG retrieve error (continuo sin RAG):", ragErr.message);
+        }
+
+        const chatMessages = [
+          { role: "system", content: systemPrompt + ragBlock }
+        ];
 
         if (roleMessages.length > 0) {
           chatMessages.push(...roleMessages);
@@ -871,6 +897,95 @@ app.post("/chat", async (req, res) => {
 });
 
 //////////////////////////////////////////////////////
+// ✅ RAG ADMIN — el bot "aprende" de nuevas conversaciones
+//////////////////////////////////////////////////////
+
+// 🔌 Endpoint ligero para el bot v14 de SalesIQ (que llama a OpenAI nativo).
+// Recibe el mensaje del cliente y devuelve SOLO el bloque de ejemplos
+// relevantes para que el handler Deluge lo concatene a su system prompt.
+// Así el bot sigue llamando a OpenAI directo, pero "aprende" de las
+// conversaciones reales sin reescribir su lógica.
+app.post("/rag/context", async (req, res) => {
+  try {
+    const { message, lang } = req.body || {};
+    if (!message || !message.trim()) {
+      return res.json({ ok: true, context: "", count: 0 });
+    }
+    const useLang = lang || rag.detectLang(message);
+    const results = await rag.retrieve(message, { topK: 3, lang: useLang });
+    res.json({
+      ok: true,
+      lang: useLang,
+      count: results.length,
+      context: rag.buildContextBlock(results)
+    });
+  } catch (err) {
+    // Nunca rompemos el flujo del bot: si falla, devolvemos contexto vacío.
+    res.json({ ok: false, context: "", count: 0, error: err.message });
+  }
+});
+
+// Estado / estadisticas de la base de conocimiento
+app.get("/rag/stats", (req, res) => {
+  try {
+    res.json({ ok: true, stats: rag.getStats() });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Probar que recupera el RAG para una consulta (debug)
+app.post("/rag/search", async (req, res) => {
+  try {
+    const { query, lang, topK } = req.body || {};
+    if (!query) return res.status(400).json({ ok: false, error: "Falta 'query'" });
+    const results = await rag.retrieve(query, { lang, topK: topK || 3 });
+    res.json({
+      ok: true,
+      results: results.map((r) => ({
+        id: r.entry.id,
+        score: Number(r.score.toFixed(3)),
+        user: r.entry.user,
+        assistant: r.entry.assistant,
+        lang: r.entry.lang,
+        sport: r.entry.sport
+      }))
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Enseñar un nuevo ejemplo (conversacion exitosa) a la base de conocimiento.
+// Protegido con un token simple via header 'x-rag-token' (env RAG_ADMIN_TOKEN).
+app.post("/rag/learn", async (req, res) => {
+  try {
+    const required = process.env.RAG_ADMIN_TOKEN;
+    if (required && req.get("x-rag-token") !== required) {
+      return res.status(401).json({ ok: false, error: "No autorizado" });
+    }
+    const { user, assistant, lang, sport, tags, note, outcome } = req.body || {};
+    if (!user || !assistant) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Se requieren 'user' y 'assistant'" });
+    }
+    const result = await rag.learnExample({
+      user,
+      assistant,
+      lang,
+      sport,
+      tags,
+      note,
+      outcome
+    });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+//////////////////////////////////////////////////////
 // ✅ SERVER
 //////////////////////////////////////////////////////
 
@@ -878,4 +993,9 @@ const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
   console.log(`🔥 Server running on port ${PORT}`);
+  // Inicializa el RAG (indexa la base de conocimiento con embeddings).
+  // No bloquea el arranque: si falla, el bot sigue funcionando sin RAG.
+  rag
+    .initRAG(openai)
+    .catch((err) => console.log("🔥 RAG init error:", err.message));
 });
