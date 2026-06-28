@@ -7,11 +7,8 @@
 //   - Permite "aprender" agregando nuevas conversaciones en caliente.
 //////////////////////////////////////////////////////
 
-const fs = require("fs");
-const path = require("path");
+const db = require("./db");
 
-const KB_PATH = path.join(__dirname, "knowledge_base.json");
-const CACHE_PATH = path.join(__dirname, "embeddings_cache.json");
 const EMBEDDING_MODEL = "text-embedding-3-small";
 
 let openaiClient = null;
@@ -45,39 +42,6 @@ function entryText(entry) {
   return parts.join(" \n ");
 }
 
-function loadKnowledgeBase() {
-  try {
-    const raw = fs.readFileSync(KB_PATH, "utf-8");
-    return JSON.parse(raw);
-  } catch (err) {
-    console.log("⚠️ RAG: no se pudo leer knowledge_base.json:", err.message);
-    return [];
-  }
-}
-
-function loadCache() {
-  try {
-    const raw = fs.readFileSync(CACHE_PATH, "utf-8");
-    return JSON.parse(raw); // { [id]: { text, embedding } }
-  } catch (err) {
-    return {};
-  }
-}
-
-function saveCache(cache) {
-  try {
-    fs.writeFileSync(CACHE_PATH, JSON.stringify(cache, null, 2), "utf-8");
-  } catch (err) {
-    console.log("⚠️ RAG: no se pudo guardar cache de embeddings:", err.message);
-  }
-}
-
-function saveKnowledgeBase(entries) {
-  // Guardamos la KB SIN los embeddings (esos viven en el cache).
-  const clean = entries.map(({ embedding, ...rest }) => rest);
-  fs.writeFileSync(KB_PATH, JSON.stringify(clean, null, 2), "utf-8");
-}
-
 //////////////////////////////////////////////////////
 // Embeddings (OpenAI)
 //////////////////////////////////////////////////////
@@ -104,33 +68,40 @@ async function initRAG(openai) {
     return;
   }
 
-  const entries = loadKnowledgeBase();
-  const cache = loadCache();
-  let cacheChanged = false;
+  // 1) Inicializa la capa de persistencia (Postgres si hay DATABASE_URL,
+  //    si no JSON local). Esto define dónde viven los ejemplos/embeddings.
+  await db.initDB();
 
-  for (const entry of entries) {
-    const text = entryText(entry);
-    const cached = cache[entry.id];
-
-    if (cached && cached.text === text && Array.isArray(cached.embedding)) {
-      entry.embedding = cached.embedding;
-    } else {
-      try {
-        entry.embedding = await embed(text);
-        cache[entry.id] = { text, embedding: entry.embedding };
-        cacheChanged = true;
-      } catch (err) {
-        console.log(`🔥 RAG: error embebiendo ${entry.id}:`, err.message);
-        entry.embedding = null;
-      }
+  // 2) Si usamos BD y está vacía, la sembramos desde knowledge_base.json
+  //    (migración automática en el primer arranque con BD).
+  if (db.isPersistent()) {
+    const n = await db.countEntries();
+    if (n === 0) {
+      await db.seedFromJsonFile();
     }
   }
 
-  if (cacheChanged) saveCache(cache);
+  // 3) Cargar todos los ejemplos (con o sin embedding).
+  const entries = await db.loadEntries();
+
+  // 4) Rellenar embeddings faltantes y persistirlos (en BD o cache JSON).
+  //    Una vez calculados, sobreviven a reinicios -> no se recalculan.
+  for (const entry of entries) {
+    if (Array.isArray(entry.embedding) && entry.embedding.length > 0) continue;
+    try {
+      entry.embedding = await embed(entryText(entry));
+      await db.saveEntry(entry); // guarda el embedding de forma permanente
+    } catch (err) {
+      console.log(`🔥 RAG: error embebiendo ${entry.id}:`, err.message);
+      entry.embedding = null;
+    }
+  }
 
   kb = entries.filter((e) => Array.isArray(e.embedding));
   ready = kb.length > 0;
-  console.log(`✅ RAG listo: ${kb.length} ejemplos indexados`);
+  console.log(
+    `✅ RAG listo: ${kb.length} ejemplos indexados (persistencia: ${db.getMode()})`
+  );
 }
 
 //////////////////////////////////////////////////////
@@ -192,7 +163,6 @@ async function learnExample(example) {
   }
   if (!openaiClient) throw new Error("RAG: OpenAI client no inicializado");
 
-  const entries = loadKnowledgeBase();
   const id = example.id || `kb-${String(Date.now())}`;
   const newEntry = {
     id,
@@ -202,21 +172,15 @@ async function learnExample(example) {
     outcome: example.outcome || "positivo",
     user: example.user,
     assistant: example.assistant,
-    note: example.note || ""
+    note: example.note || "",
+    source: example.source || "manual"
   };
 
-  entries.push(newEntry);
-  saveKnowledgeBase(entries);
-
-  // Embeber y cachear el nuevo ejemplo
-  const text = entryText(newEntry);
-  const embedding = await embed(text);
-  const cache = loadCache();
-  cache[id] = { text, embedding };
-  saveCache(cache);
+  // Embeber el nuevo ejemplo y persistirlo (BD o JSON) — permanente.
+  newEntry.embedding = await embed(entryText(newEntry));
+  await db.saveEntry(newEntry);
 
   // Agregar a la KB en memoria (caliente, sin reiniciar)
-  newEntry.embedding = embedding;
   kb.push(newEntry);
   ready = kb.length > 0;
 
