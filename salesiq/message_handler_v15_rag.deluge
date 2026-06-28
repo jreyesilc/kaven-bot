@@ -308,15 +308,12 @@ try
                 parameters:ragBody.toString()
                 headers:{"Content-Type":"application/json"}
         ];
-        // ragResp puede venir como Map o como texto JSON, normalizamos
+        // invokeurl con respuesta JSON ya viene como Map en Deluge.
+        // Lo usamos directo; si fuera texto, el catch deja ragContext vacio (fallback).
         if(ragResp != null)
         {
                 ragMap = ragResp;
-                if(typeof(ragResp) == "string")
-                {
-                        ragMap = ragResp.toMap();
-                }
-                if(ragMap != null && ragMap.get("context") != null)
+                if(ragMap.get("context") != null)
                 {
                         ragContext = ragMap.get("context");
                 }
