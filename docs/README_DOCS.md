@@ -12,6 +12,7 @@
 |-----------|-----------|--------|
 | 🐛 **Bugs Resueltos** | 1 documento | Completo |
 | ⚡ **Optimizaciones** | 2 documentos | Completo |
+| 🔗 **Integraciones** | 1 documento | Implementado (pend. publicar) |
 | ⚙️ **Configuración** | 1 documento | Pendiente |
 | 📖 **Guías** | 1 documento | Completo |
 
@@ -87,6 +88,36 @@
 **Proyección de mejora:**
 - **-56% costo por lead calificado**
 - **+57% más leads de calidad**
+
+---
+
+## 🔗 Integraciones
+
+### 1. Handoff de Leads de Meta → Zobot (sin preguntas duplicadas)
+**Fecha:** 29 de junio, 2026 | **Tipo:** Integración / Conversión | **Estado:** ✅ IMPLEMENTADO · ⏳ Pendiente publicar
+
+📄 [Ver guía completa](integraciones/meta_lead_handoff.md) ⭐ **NUEVO**
+
+**Problema:**
+- Los leads que ya respondieron el cuestionario de Meta (deporte, cantidad, fecha, diseño, contacto) llegaban a la landing y **el Zobot les repetía las mismas preguntas** → fricción y pérdida de leads.
+
+**Solución:**
+- **`landing/meta-lead-context.js`**: captura los parámetros de la URL (`?source=meta&name=..&phone=..&sport=..&quantity=..&date=..&design=..`), los persiste en local/sessionStorage y los inyecta al visitante de SalesIQ (`$zoho.salesiq.visitor.info` → campo `kvn_meta`). Expone `window.KavenMetaLead`.
+- **`salesiq/message_handler_v17_meta_aware.deluge`** (basado en v16): detecta al lead de Meta, **salta el formulario**, lo **saluda por su nombre**, reconoce sus datos, va directo al **catálogo** y crea el lead en CRM. Para visitantes directos: flujo v16 sin cambios.
+
+**Resultado esperado:**
+- 0 preguntas duplicadas a leads de Meta → menos fricción, más conversión.
+- Lead creado automáticamente en CRM con `Lead Source = Meta`.
+
+**Archivos:**
+- `landing/meta-lead-context.js` (nuevo)
+- `salesiq/message_handler_v17_meta_aware.deluge` (nuevo)
+- `docs/integraciones/meta_lead_handoff.md` (nuevo)
+
+**Pendiente para producción:**
+1. Configurar el link con parámetros en el Meta Bot / Instant Form.
+2. Desplegar `meta-lead-context.js` en la landing.
+3. Publicar el Message Handler v17 en SalesIQ.
 
 ---
 
@@ -173,14 +204,20 @@ kaven-bot/
 │   ├── optimizaciones/
 │   │   ├── 2026-06-28_prompt_multi_deporte.md
 │   │   └── 2026-06-28_analisis_mejores_practicas_formularios.md
+│   ├── integraciones/
+│   │   └── meta_lead_handoff.md             ← Handoff Meta → Zobot
 │   ├── configuracion/
 │   │   └── meta_forms_kings_sportswear.md
 │   └── guias_implementacion/
 │       └── como_publicar_cambios_bot.md
+├── landing/                                 ← Scripts para la landing
+│   ├── cycling-catalog-snippet.html
+│   └── meta-lead-context.js                 ← Tracking de leads de Meta
 ├── salesiq/                                 ← Scripts de Zoho SalesIQ
 │   ├── message_handler_v14_native_openai.deluge
 │   ├── message_handler_v15_rag.deluge
-│   ├── message_handler_v16_smart_signals.deluge
+│   ├── message_handler_v16_smart_signals.deluge ← EN PRODUCCIÓN (actual)
+│   ├── message_handler_v17_meta_aware.deluge    ← NUEVO (meta-aware)
 │   ├── context_handler_v13_short.deluge
 │   ├── context_handler_v14_minimal.deluge   ← EN PRODUCCIÓN
 │   └── rag_integration_v15.deluge
