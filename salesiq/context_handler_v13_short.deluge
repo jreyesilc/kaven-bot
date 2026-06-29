@@ -22,7 +22,12 @@ response = Map();
 //   CAPA 5 - Respuesta segura: Si backend falla, NO reintentar
 //
 // Autor: Kaven Sports Bot Team
-// Version: 13.0 (formulario corto para móvil)
+// Version: 13.1 (FIX FREEZE: telefono sanitizado + try/catch en searchRecords + lectura null-safe)
+//   - El bot se congelaba ("escribiendo...") tras enviar el formulario porque el
+//     telefono llegaba como "+1 6641234567" (con + y espacio) y rompia la consulta
+//     zoho.crm.searchRecords de CAPA 4 con una excepcion NO capturada.
+//   - Ahora la busqueda usa solo digitos y esta envuelta en try/catch; ademas
+//     la lectura de answers es null-safe. El handler SIEMPRE devuelve respuesta.
 // =========================================================================
 portalName = "jreyesilcmx";
 backendUrl = "https://kaven-bot.onrender.com/lead";
@@ -88,8 +93,18 @@ zoho.salesiq.visitorsession.set(portalName,lockMap);
 // =========================================================================
 // AHORA es seguro leer los datos del formulario
 // =========================================================================
-leadName = answers.get("name").get("text");
-leadPhone = answers.get("phone").get("text");
+// --- Lectura NULL-SAFE de los campos del formulario ---
+// (evita NullPointerException que congelaria el handler si falta un campo)
+leadName = "";
+if(answers.get("name") != null && answers.get("name").get("text") != null)
+{
+        leadName = answers.get("name").get("text");
+}
+leadPhone = "";
+if(answers.get("phone") != null && answers.get("phone").get("text") != null)
+{
+        leadPhone = answers.get("phone").get("text");
+}
 
 // --- Email es OPCIONAL en el formulario corto ---
 // Si no se proporciona, generamos un placeholder basado en el telefono
@@ -207,16 +222,45 @@ if(flagTimestamp != "")
 // Buscamos directamente en Zoho CRM si ya existe un lead con este telefono.
 // Esta es la proteccion mas solida porque no depende de la sesion.
 // =========================================================================
-existingLeads = zoho.crm.searchRecords("Leads","(Phone:equals:" + leadPhone + ")");
-if(existingLeads != null && existingLeads.size() > 0)
+// IMPORTANTE: el telefono del formulario puede llegar con prefijo y espacios
+// (ej. "+1 6641234567"). El criterio searchRecords con "+" y espacio ROMPE la
+// consulta CRM y lanzaba una excepcion NO capturada que congelaba el bot.
+// Solucion: (1) buscar con los digitos limpios, (2) envolver TODO en try/catch
+// para que un fallo del CRM jamas impida devolver una respuesta al visitante.
+phoneDigitsSearch = "";
+if(leadPhone != null && leadPhone != "")
+{
+        phoneDigitsSearch = leadPhone.replaceAll("[^0-9]","","ALL");
+}
+existingId = "";
+foundExistingLead = false;
+try
+{
+        if(phoneDigitsSearch != "")
+        {
+                existingLeads = zoho.crm.searchRecords("Leads","(Phone:equals:" + phoneDigitsSearch + ")");
+                if(existingLeads != null && existingLeads.size() > 0)
+                {
+                        existingId = existingLeads.get(0).get("id").toString();
+                        foundExistingLead = true;
+                }
+        }
+}
+catch (e4)
+{
+        // Si la busqueda en CRM falla, NO congelar: seguimos al backend /lead,
+        // que tiene su propia deduplicacion robusta.
+        foundExistingLead = false;
+}
+if(foundExistingLead)
 {
         // Ya existe un lead con este telefono en CRM - no crear otro
-        existingId = existingLeads.get(0).get("id");
         dedupState = Map();
         dedupState.put("lead_created","true");
         dedupState.put("lead_lock","false");
         dedupState.put("lead_created_timestamp",zoho.currenttime.toString("yyyy-MM-dd HH:mm:ss"));
         dedupState.put("lead_phone_saved",leadPhone);
+        dedupState.put("lead_captured","true");
         dedupState.put("crm_lead_id",existingId);
         dedupState.put("debug_blocked_by","capa4_crm_dedup");
         zoho.salesiq.visitorsession.set(portalName,dedupState);
@@ -362,7 +406,7 @@ finalState.put("buy_signals",signalsRaw);
 finalState.put("raw_message",rawMessage);
 finalState.put("last_user_message",lastUserMessage);
 finalState.put("bot_lang",botLang);
-finalState.put("debug_ch_version","v13_formulario_corto");
+finalState.put("debug_ch_version","v13.1_freeze_fix");
 finalState.put("debug_backend_response",leadRespText);
 zoho.salesiq.visitorsession.set(portalName,finalState);
 // --- Actualizar flag de sesion para que el bot sepa que ya se capturo ---
