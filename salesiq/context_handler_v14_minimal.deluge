@@ -3,33 +3,34 @@ response = Map();
 // CONTEXT HANDLER v14 - MINIMO (FIX FREEZE DEFINITIVO)
 // =========================================================================
 // CAUSA RAIZ DEL CONGELAMIENTO (confirmada con diagnosticos en vivo):
-//   El Context Handler de SalesIQ tiene un LIMITE DE TIEMPO DE EJECUCION
-//   muy corto. Las versiones previas (v13.x) hacian ~10 llamadas de red
-//   (multiples zoho.salesiq.visitorsession.get/set para las "5 capas" de
-//   anti-duplicados, parseo de fecha, procesamiento de listas) MAS la
-//   llamada al backend. La SUMA de todos esos tiempos superaba el limite,
-//   SalesIQ mataba el script y el handler NUNCA devolvia respuesta -> el
-//   bot quedaba en "escribiendo..." para siempre tras enviar el formulario.
+//   La instruccion  leadPhone.replaceAll("[^0-9]","","ALL")  usaba una
+//   sintaxis INVALIDA de Deluge (un tercer argumento "ALL" que no existe).
+//   En lugar de lanzar un error visible, el motor de scripts de SalesIQ se
+//   COLGABA al evaluar esa linea, el handler NUNCA devolvia respuesta y el
+//   bot quedaba en "escribiendo..." para siempre tras enviar el formulario
+//   de WhatsApp. Esa linea estaba presente desde la v13, por eso el
+//   congelamiento era 100% reproducible.
 //
-//   Diagnosticos que lo probaron (cada uno por separado responde al
-//   instante, pero TODOS juntos exceden el limite):
-//     - Solo responder            -> OK instantaneo
-//     - Solo invokeurl al backend -> OK instantaneo
-//     - Solo 9 ops de sesion      -> OK instantaneo
-//     - Handler completo (todo)   -> SE CONGELA
+//   Diagnosticos en vivo que lo probaron (publicados uno a uno):
+//     - Solo responder                         -> OK instantaneo
+//     - Solo invokeurl al backend (/lead)       -> OK instantaneo
+//     - Solo operaciones de sesion (get/set)    -> OK instantaneo
+//     - SOLO la linea replaceAll(...,"ALL")     -> SE CONGELA  <-- culpable
+//     - replaceAll de 2 argumentos / sin regex  -> OK
 //
-// SOLUCION (v14): handler MINIMO. Se eliminan las capas de sesion
-//   redundantes. La deduplicacion queda 100% cubierta por el BACKEND, que
-//   deduplica por EMAIL determinista derivado del telefono
-//   (lead-<digitos>@kavensports.com): un mismo telefono SIEMPRE genera el
-//   mismo email, asi que aunque el handler se ejecute 2 veces el backend
-//   actualiza el lead existente en lugar de duplicarlo.
-//   Ademas el backend /lead ahora responde de inmediato (crea el lead en
-//   segundo plano), por lo que el invokeurl regresa en <1s.
+// SOLUCION (v14):
+//   1) Se ELIMINA por completo el replaceAll en Deluge. El handler ya NO
+//      calcula el email; solo envia el TELEFONO crudo. El BACKEND deriva el
+//      email determinista (lead-<digitos>@kavensports.com) con regex de
+//      JavaScript (confiable) y deduplica por ese email, asi que un mismo
+//      telefono SIEMPRE genera el mismo email y no se crean duplicados.
+//   2) Handler MINIMO: se eliminan las "5 capas" de sesion redundantes.
+//      La dedup la garantiza el backend. Ademas el backend /lead responde
+//      de inmediato (crea el lead en segundo plano), por lo que el
+//      invokeurl regresa en <1s.
 //
 //   Operaciones de red en v14: 1 get (producto del boton) + 1 invokeurl +
-//   1 set (flag para el message handler) = 3 en total. Muy por debajo del
-//   limite de SalesIQ.
+//   1 set (flag para el message handler) = 3 en total.
 //
 // Version: 14.0
 // Autor: Kaven Sports Bot Team
@@ -41,31 +42,23 @@ backendUrl = "https://kaven-bot.onrender.com/lead";
 leadName = "";
 if(answers.get("name") != null && answers.get("name").get("text") != null)
 {
-	leadName = answers.get("name").get("text");
+        leadName = answers.get("name").get("text");
 }
 leadPhone = "";
 if(answers.get("phone") != null && answers.get("phone").get("text") != null)
 {
-	leadPhone = answers.get("phone").get("text");
+        leadPhone = answers.get("phone").get("text");
 }
 
-// --- Email determinista derivado del telefono (clave de dedup del backend) ---
-phoneDigits = leadPhone.replaceAll("[^0-9]","","ALL");
-leadEmail = "";
-if(phoneDigits != "")
-{
-	leadEmail = "lead-" + phoneDigits + "@kavensports.com";
-}
-else
-{
-	leadEmail = "lead-" + zoho.currenttime.toLong() + "@kavensports.com";
-}
+// NOTA: el email lo deriva el BACKEND a partir del telefono (regex JS).
+// Aqui NO usamos replaceAll de Deluge para evitar el cuelgue que congelaba
+// el bot. Solo enviamos el telefono crudo.
 
 // --- Producto seleccionado en el multiselect del formulario ---
 addedProducts = "";
 if(answers.get("products") != null && answers.get("products").get("text") != null)
 {
-	addedProducts = "" + answers.get("products").get("text");
+        addedProducts = "" + answers.get("products").get("text");
 }
 
 // --- Producto del boton "Get a quote" (landing de ciclismo) - 1 sola lectura ---
@@ -73,40 +66,39 @@ clickedProduct = "";
 psProd = zoho.salesiq.visitorsession.get(portalName,"lead_clicked_product");
 if(psProd != null)
 {
-	pData = psProd.get("data");
-	if(pData != null && pData.get("lead_clicked_product") != null)
-	{
-		clickedProduct = "" + pData.get("lead_clicked_product");
-	}
+        pData = psProd.get("data");
+        if(pData != null && pData.get("lead_clicked_product") != null)
+        {
+                clickedProduct = "" + pData.get("lead_clicked_product");
+        }
 }
 
 // --- Construir el texto final de productos ---
 productList = "";
 if(clickedProduct != "")
 {
-	productList = clickedProduct;
+        productList = clickedProduct;
 }
 // Ignorar opciones "No, solo <producto>" y "Aun no estoy seguro"
 if(addedProducts != "" && addedProducts.indexOf("No, solo") != 0 && addedProducts.indexOf("Aun no estoy seguro") != 0)
 {
-	if(productList == "")
-	{
-		productList = addedProducts;
-	}
-	else
-	{
-		productList = productList + ", " + addedProducts;
-	}
+        if(productList == "")
+        {
+                productList = addedProducts;
+        }
+        else
+        {
+                productList = productList + ", " + addedProducts;
+        }
 }
 if(productList == "")
 {
-	productList = "No especificado";
+        productList = "No especificado";
 }
 
 // --- Llamada al backend (responde de inmediato; crea el lead en background) ---
 postBody = Map();
 postBody.put("name",leadName);
-postBody.put("email",leadEmail);
 postBody.put("phone",leadPhone);
 postBody.put("products",productList);
 postBody.put("message","Lead capturado por chatbot Kaven Sports (formulario corto v14)");
@@ -115,17 +107,17 @@ headerMap = Map();
 headerMap.put("Content-Type","application/json");
 try 
 {
-	leadResp = invokeurl
-	[
-		url :backendUrl
-		type :POST
-		parameters:postBody.toString()
-		headers:headerMap
-	];
+        leadResp = invokeurl
+        [
+                url :backendUrl
+                type :POST
+                parameters:postBody.toString()
+                headers:headerMap
+        ];
 }
 catch (e)
 {
-	// Si el backend fallara, NO reintentamos: el lead se revisa manualmente.
+        // Si el backend fallara, NO reintentamos: el lead se revisa manualmente.
 }
 
 // --- Marcar como capturado para que el Message Handler no re-muestre el form ---
