@@ -1,0 +1,301 @@
+# 📚 Documentación Kaven Sports Bot
+
+**Última actualización:** 29 de junio, 2026  
+**Mantenido por:** Juan Reyes (Kaven Sports)  
+**Asistido por:** Abacus AI Agent  
+
+---
+
+## 🎯 Índice Rápido
+
+| Categoría | Documentos | Estado |
+|-----------|-----------|--------|
+| 🐛 **Bugs Resueltos** | 1 documento | Completo |
+| ⚡ **Optimizaciones** | 2 documentos | Completo |
+| ⚙️ **Configuración** | 1 documento | Pendiente |
+| 📖 **Guías** | 1 documento | Completo |
+
+---
+
+## 🐛 Bugs Resueltos
+
+### 1. Bot se Congela Después del Formulario de WhatsApp
+**Fecha:** 27 de junio, 2026 | **Severidad:** 🔴 CRÍTICO | **Estado:** ✅ RESUELTO
+
+📄 [Ver documentación completa](bugs_resueltos/2026-06-27_bot_freeze_replaceall.md)
+
+**Resumen:**
+- **Problema:** Bot se congelaba después de que el usuario completaba el formulario de leads
+- **Causa raíz:** Línea inválida en Deluge: `replaceAll("[^0-9]","","ALL")` (3er argumento no existe)
+- **Solución:** Context Handler v14 simplificado + backend async
+- **Impacto:** 100% de formularios ahora completan exitosamente
+
+**Archivos modificados:**
+- `server.js` (commits: `627aa2e`, `d394a9a`)
+- `salesiq/context_handler_v14_minimal.deluge` (commit: `520bcfc`)
+
+**Aprendizajes clave:**
+- Zoho SalesIQ no muestra errores de runtime, solo congela
+- Backend asíncrono mejora UX (respuesta inmediata)
+- Caché en memoria necesario por latencia de Zoho CRM
+
+---
+
+## ⚡ Optimizaciones
+
+### 1. Prompt Multi-Deporte (No Ofrecer Ciclismo para Fútbol)
+**Fecha:** 28 de junio, 2026 | **Tipo:** Optimización de IA | **Estado:** ✅ IMPLEMENTADO
+
+📄 [Ver documentación completa](optimizaciones/2026-06-28_prompt_multi_deporte.md)
+
+**Resumen:**
+- **Problema:** Bot ofrecía tiers de ciclismo (Standard/Elite/Premiere) para todos los deportes
+- **Solución:** Sección dedicada en `systemPrompt` diferenciando líneas de producto por deporte
+- **Resultado:** Bot ahora menciona "calidad premium única" para fútbol/baseball/etc.
+
+**Testing:**
+- ✅ Fútbol: NO menciona tiers ← Correcto
+- ✅ Ciclismo: SÍ menciona 3 tiers ← Correcto
+- ✅ Baseball (inglés): "premium quality" ← Correcto
+
+**Archivo modificado:**
+- `server.js` (commit: `c81e3a5`)
+
+---
+
+### 2. Análisis de Mejores Prácticas para Formularios
+**Fecha:** 28 de junio, 2026 | **Tipo:** Investigación + Recomendaciones | **Estado:** 📊 REFERENCIA
+
+📄 [Ver análisis completo](optimizaciones/2026-06-28_analisis_mejores_practicas_formularios.md) ⭐ **ALTAMENTE RECOMENDADO**
+
+**Contenido:**
+- Investigación de industria (uniformes deportivos, productos B2B, Meta Instant Forms)
+- Benchmarks de +10,000 formularios
+- Evaluación de formularios actuales de Kaven Sports
+- Plan de acción priorizado (alta/media/baja)
+
+**Hallazgos principales:**
+- **Número óptimo de campos:** 3-5 (Kaven tiene 7, está en límite aceptable)
+- **Velocidad de respuesta crítica:** <1 hora = 7x más conversión
+- **Meta Conversion Leads:** Puede reducir CPL en -19%
+
+**Recomendaciones de prioridad alta:**
+1. Corregir mensaje "Kings Sportswear" → "Kaven Sports"
+2. Cambiar botón CTA: "Enviar" → "Obtener mi cotización gratis"
+3. Automatizar notificación de nuevo lead (<1 hora de respuesta)
+
+**Proyección de mejora:**
+- **-56% costo por lead calificado**
+- **+57% más leads de calidad**
+
+---
+
+## ⚙️ Configuración
+
+### 1. Actualizar Formularios de Meta (Kings → Kaven)
+**Fecha:** 29 de junio, 2026 | **Prioridad:** 🔴 ALTA (branding) | **Estado:** ⏳ PENDIENTE
+
+📄 [Ver guía completa](configuracion/meta_forms_kings_sportswear.md)
+
+**Problema:**
+- Formularios de Meta todavía dicen "KINGS SPORTSWEAR" en mensaje de agradecimiento
+- Botón probablemente apunta a landing antiguo
+
+**Solución:**
+- Crear nuevo formulario duplicando actual
+- Actualizar texto de agradecimiento y URL del botón
+- Activar tipo "Higher Intent" para mejor calidad de leads
+- Actualizar campañas activas
+- Archivar formularios antiguos
+
+**Formularios a actualizar:**
+- "Kings - Thinkers-copy"
+- "Kings - Thinkers"
+
+**Estado:** Requiere acción manual desde navegador local de Juan
+
+---
+
+## 📖 Guías de Implementación
+
+### 1. Cómo Publicar Cambios en el Bot
+**Fecha:** 29 de junio, 2026 | **Tipo:** Guía técnica | **Estado:** 📖 REFERENCIA
+
+📄 [Ver guía completa](guias_implementacion/como_publicar_cambios_bot.md)
+
+**Contenido:**
+- Arquitectura del sistema (diagrama)
+- Flujos de cambios (Backend, Zoho SalesIQ, Meta Forms)
+- Testing post-deploy
+- Versionado de scripts
+- Troubleshooting común
+- Rollback de emergencia
+
+**Casos de uso:**
+- ✅ Modificar `systemPrompt` del bot
+- ✅ Cambiar lógica de creación de leads
+- ✅ Actualizar scripts de Zoho SalesIQ
+- ✅ Resolver bot congelado
+- ✅ Revertir deploy problemático
+
+---
+
+## 📊 Estado Actual del Sistema
+
+### ✅ Producción (Funcionando)
+
+| Componente | Versión | Estado | URL/Ubicación |
+|-----------|---------|--------|--------------|
+| **Backend** | Última (main) | 🟢 Activo | https://kaven-bot.onrender.com |
+| **Message Handler** | v16 (smart signals) | 🟢 Activo | Zoho SalesIQ |
+| **Context Handler** | v14 (minimal) | 🟢 Activo | Zoho SalesIQ |
+| **Sitio Web** | - | 🟢 Activo | https://kavensports.com |
+
+### ⏳ Pendientes
+
+| Tarea | Prioridad | Estimado | Dueño |
+|-------|-----------|----------|-------|
+| Actualizar formularios Meta | 🔴 Alta | 1 hora | Juan |
+| Notificación automática leads | 🟡 Media | 30 min | Juan + AI Agent |
+| Integrar Meta Conversions API | 🟡 Media | 2-3 horas | AI Agent |
+| Landing page propia | 🔵 Baja | Proyecto completo | Futuro |
+
+---
+
+## 🗂️ Estructura de Carpetas
+
+```
+kaven-bot/
+├── docs/                                    ← ESTÁS AQUÍ
+│   ├── README_DOCS.md                       ← Este archivo (índice maestro)
+│   ├── bugs_resueltos/
+│   │   └── 2026-06-27_bot_freeze_replaceall.md
+│   ├── optimizaciones/
+│   │   ├── 2026-06-28_prompt_multi_deporte.md
+│   │   └── 2026-06-28_analisis_mejores_practicas_formularios.md
+│   ├── configuracion/
+│   │   └── meta_forms_kings_sportswear.md
+│   └── guias_implementacion/
+│       └── como_publicar_cambios_bot.md
+├── salesiq/                                 ← Scripts de Zoho SalesIQ
+│   ├── message_handler_v14_native_openai.deluge
+│   ├── message_handler_v15_rag.deluge
+│   ├── message_handler_v16_smart_signals.deluge
+│   ├── context_handler_v13_short.deluge
+│   ├── context_handler_v14_minimal.deluge   ← EN PRODUCCIÓN
+│   └── rag_integration_v15.deluge
+├── rag/                                     ← Sistema RAG (auto-aprendizaje)
+│   ├── auto_learn_weekly.py
+│   ├── db.js
+│   └── rag.js
+├── server.js                                ← Backend principal (Node.js)
+├── package.json
+└── README.md                                ← README del proyecto
+```
+
+---
+
+## 🔍 Cómo Usar Esta Documentación
+
+### Para Desarrolladores
+1. **Antes de hacer cambios:** Lee la [guía de publicación](guias_implementacion/como_publicar_cambios_bot.md)
+2. **Si encuentras un bug:** Documéntalo en `bugs_resueltos/`
+3. **Si implementas mejora:** Documéntala en `optimizaciones/`
+4. **Actualiza este índice:** Al agregar nuevos documentos
+
+### Para Referencia Futura
+- **¿Qué causó el freeze del bot?** → [Bug: replaceAll](bugs_resueltos/2026-06-27_bot_freeze_replaceall.md)
+- **¿Cómo optimizar formularios?** → [Análisis de mejores prácticas](optimizaciones/2026-06-28_analisis_mejores_practicas_formularios.md)
+- **¿Cómo publicar cambios?** → [Guía de publicación](guias_implementacion/como_publicar_cambios_bot.md)
+- **¿Qué falta hacer con Meta?** → [Config: Meta Forms](configuracion/meta_forms_kings_sportswear.md)
+
+### Para Nuevos Desarrolladores
+**Orden de lectura recomendado:**
+1. [Guía: Cómo publicar cambios](guias_implementacion/como_publicar_cambios_bot.md) ← Entender arquitectura
+2. [Bug: Bot freeze](bugs_resueltos/2026-06-27_bot_freeze_replaceall.md) ← Contexto de problemas pasados
+3. [Optimización: Prompt multi-deporte](optimizaciones/2026-06-28_prompt_multi_deporte.md) ← Ejemplo de mejora
+4. [Análisis: Formularios](optimizaciones/2026-06-28_analisis_mejores_practicas_formularios.md) ← Roadmap futuro
+
+---
+
+## 📅 Historial de Sesiones
+
+### Sesión 1: 27-29 de junio, 2026
+**Temas cubiertos:**
+1. ✅ Diagnóstico y resolución de bug crítico (bot freeze)
+2. ✅ Optimización de prompt para multi-deporte
+3. ✅ Análisis de mejores prácticas para formularios
+4. ⏳ Identificación de problema en Meta Forms (pendiente)
+
+**Commits principales:**
+- `627aa2e`: Backend async para /lead
+- `520bcfc`: Context Handler v14 minimal (sin replaceAll)
+- `d394a9a`: Deduplicación con caché en memoria
+- `c81e3a5`: Prompt optimizado multi-deporte
+- `2251944`: Análisis de mejores prácticas
+
+**Resultado:** Sistema estable en producción, roadmap de optimizaciones definido
+
+---
+
+## 🆘 Soporte y Contacto
+
+**Propietario del Proyecto:**
+- Juan Reyes (Kaven Sports)
+- Email: [contacto@kavensports.com]
+
+**Asistencia Técnica:**
+- Abacus AI Agent (sesiones de desarrollo)
+
+**Repositorio:**
+- GitHub: https://github.com/jreyesilc/kaven-bot
+
+---
+
+## 📝 Convenciones de Documentación
+
+### Nomenclatura de Archivos
+```
+YYYY-MM-DD_tema_especifico.md
+```
+
+### Convenciones de Estado
+- ✅ **RESUELTO / IMPLEMENTADO:** Completado y en producción
+- ⏳ **PENDIENTE:** Identificado pero no implementado
+- 📊 **REFERENCIA:** Documento informativo/analítico
+- 📖 **GUÍA:** Documento de procedimientos
+
+### Convenciones de Prioridad
+- 🔴 **ALTA:** Impacto crítico en negocio/UX
+- 🟡 **MEDIA:** Mejora significativa
+- 🔵 **BAJA:** Nice-to-have, largo plazo
+
+---
+
+## 🚀 Próximos Pasos Recomendados
+
+### Esta Semana
+1. 🔴 Actualizar formularios de Meta (Kings → Kaven)
+2. 🔴 Configurar notificación automática de leads
+3. 🟡 A/B test: reordenar campos del formulario
+
+### Este Mes
+4. 🟡 Implementar Meta Conversions API
+5. 🟡 Evaluar resultados de optimizaciones
+6. 🔵 Considerar landing page propia
+
+---
+
+**¿Necesitas agregar nueva documentación?**
+
+Crea un archivo en la carpeta correspondiente y actualiza este índice:
+```bash
+cd /home/ubuntu/github_repos/kaven-bot/docs
+vim categoria/YYYY-MM-DD_tema.md
+# Agregar link a este README_DOCS.md
+```
+
+---
+
+**Versión de este documento:** 1.0  
+**Última revisión:** 29 de junio, 2026
