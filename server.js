@@ -699,9 +699,31 @@ app.get("/lead-fields", async (req, res) => {
   }
 });
 
-app.post("/lead", async (req, res) => {
+app.post("/lead", (req, res) => {
   console.log("📥 /lead request:", JSON.stringify(req.body));
-  try {
+
+  // =====================================================================
+  // FIX FREEZE (causa raíz del congelamiento del bot de SalesIQ):
+  // El Context Handler de SalesIQ tiene un LÍMITE DE TIEMPO DE EJECUCIÓN
+  // muy corto para su script. La creación del lead aquí hace VARIAS
+  // llamadas SECUENCIALES a la API de Zoho CRM (refresh token + búsqueda
+  // de duplicados + creación/actualización), que en conjunto tardaban lo
+  // suficiente como para que SalesIQ MATARA el script del handler antes de
+  // recibir la respuesta del invokeurl. Como el handler nunca devolvía una
+  // respuesta, el bot quedaba en "escribiendo..." para siempre tras enviar
+  // el formulario de WhatsApp.
+  //
+  // SOLUCIÓN: respondemos al instante (ok:true) y creamos el lead en
+  // SEGUNDO PLANO (fire-and-forget). Así el invokeurl del handler regresa
+  // en <1s, el handler termina y muestra el mensaje de confirmación. La
+  // creación real del lead continúa en el servidor (proceso Node
+  // persistente en Render) y la deduplicación por email evita duplicados.
+  // El cliente puede pasar ?sync=1 para forzar el comportamiento síncrono
+  // (útil para pruebas con curl).
+  // =====================================================================
+  const sync = req.query && (req.query.sync === "1" || req.query.sync === "true");
+
+  const procesar = async () => {
     let { name, email, phone, signals, buying_signals, message, raw_message, quantity, deadline, design, products } = req.body || {};
 
     // ✅ Productos seleccionados desde la landing de ciclismo
@@ -756,11 +778,28 @@ app.post("/lead", async (req, res) => {
     console.log("🧾 /lead señales finales a procesar:", signals, "email:", email);
     const result = await crearLeadCompleto({ name, email, phone, signals, message, uniforme: productosTexto });
     console.log("📤 /lead resultado:", JSON.stringify(result));
-    return res.json(result);
-  } catch (err) {
-    console.log("🔥 /lead error:", err.message);
-    return res.json({ ok: false, error: err.message });
+    return result;
+  };
+
+  if (sync) {
+    // Modo síncrono (pruebas): esperamos el resultado real.
+    procesar()
+      .then((result) => res.json(result))
+      .catch((err) => {
+        console.log("🔥 /lead error (sync):", err.message);
+        res.json({ ok: false, error: err.message });
+      });
+    return;
   }
+
+  // Modo normal (bot): responder de inmediato para no exceder el límite de
+  // tiempo del Context Handler de SalesIQ.
+  res.json({ ok: true, queued: true });
+
+  // Crear el lead en segundo plano (no bloquea la respuesta).
+  procesar().catch((err) => {
+    console.log("🔥 /lead error (async):", err.message);
+  });
 });
 
 //////////////////////////////////////////////////////
