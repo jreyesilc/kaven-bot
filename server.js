@@ -480,6 +480,26 @@ async function actualizarLeadExistente(token, leadId, mergedLabels, phone, messa
   }
 }
 
+// 🛡️ Caché en memoria de leads creados recientemente (clave = email determinista).
+// Cubre la ventana en la que la busqueda de Zoho CRM aun no indexa el lead
+// recien creado (~segundos a 1 min). Evita duplicados por envios rapidos.
+const _recentLeads = new Map(); // email -> { id, ts }
+const RECENT_LEAD_TTL_MS = 10 * 60 * 1000; // 10 minutos
+function _recordRecentLead(email, id) {
+  if (!email) return;
+  _recentLeads.set(email, { id, ts: Date.now() });
+}
+function _getRecentLead(email) {
+  if (!email) return null;
+  const entry = _recentLeads.get(email);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > RECENT_LEAD_TTL_MS) {
+    _recentLeads.delete(email);
+    return null;
+  }
+  return entry;
+}
+
 async function crearLeadCompleto({ name, email, phone, signals, message, uniforme }) {
   const token = await refreshZohoToken();
   if (!token) {
@@ -507,9 +527,29 @@ async function crearLeadCompleto({ name, email, phone, signals, message, uniform
   // 🛡️ DEDUPLICACION POR EMAIL (backend)
   // Antes de crear, buscamos si ya existe un lead con ese email.
   // Si existe: actualizamos sus señales (merge) en lugar de duplicar.
+  //
+  // IMPORTANTE: el bot (Context Handler v14) ya NO envia email; solo envia
+  // el telefono. Por eso derivamos aqui el email DETERMINISTA a partir del
+  // telefono (lead-<digitos>@kavensports.com) ANTES de buscar duplicados.
+  // Si la dedup se hiciera con el 'email' crudo (vacio) se omitiria y se
+  // crearia un duplicado en cada envio.
   //////////////////////////////////////////////////////
-  const existing = await buscarLeadPorEmail(token, email);
+  const phoneClean = (phone || "").toString().trim().replace(/[^0-9]/g, "");
+  const emailFinal = email && email.trim()
+    ? email.trim()
+    : (phoneClean ? `lead-${phoneClean}@kavensports.com` : `lead-${Date.now()}@kavensports.com`);
+
+  // 1) Chequeo rapido en cache (cubre la latencia de indexacion de Zoho)
+  const cached = _getRecentLead(emailFinal);
+  if (cached && cached.id) {
+    console.log(`♻️ crearLeadCompleto: duplicado por cache para ${emailFinal} -> ${cached.id}`);
+    return { ok: true, id: cached.id, duplicate: true, cached: true };
+  }
+
+  // 2) Chequeo en Zoho CRM por email exacto
+  const existing = await buscarLeadPorEmail(token, emailFinal);
   if (existing && existing.id) {
+    _recordRecentLead(emailFinal, existing.id);
     const mergedLabels = mergeSignals(existing.Se_ales_de_Compra, labels);
     const upd = await actualizarLeadExistente(token, existing.id, mergedLabels, phone, message);
     return {
@@ -532,14 +572,8 @@ async function crearLeadCompleto({ name, email, phone, signals, message, uniform
     lastName = fullName.substring(spaceIdx + 1).trim();
   }
 
-  // ✅ FORMULARIO CORTO v13: Email puede ser opcional en el bot
-  // Si no se proporciona, usamos un placeholder con el telefono para cumplir
-  // con el campo obligatorio de Zoho CRM sin perder el lead.
-  const phoneClean = (phone || "").toString().trim().replace(/[^0-9]/g, "");
-  const emailFinal = email && email.trim() 
-    ? email.trim() 
-    : (phoneClean ? `lead-${phoneClean}@kavensports.com` : `lead-${Date.now()}@kavensports.com`);
-
+  // ✅ FORMULARIO CORTO v13: Email puede ser opcional en el bot.
+  // phoneClean / emailFinal ya se calcularon arriba (antes de la dedup).
   const record = {
     First_Name: firstName,
     Last_Name: lastName || firstName,
@@ -640,6 +674,7 @@ async function crearLeadCompleto({ name, email, phone, signals, message, uniform
       if (detail && detail.code === "SUCCESS") {
         const newId = detail.details ? detail.details.id : "";
         console.log(`✅ Lead creado en Zoho (id=${newId}) señales=${JSON.stringify(labels)} dropped=${signalsFieldDropped}`);
+        _recordRecentLead(emailFinal, newId);
         return {
           ok: true,
           id: newId,
