@@ -61,6 +61,15 @@
       return "";
     }
     var v = ("" + value).trim();
+    // IMPORTANTE: Meta NO sustituye tokens de plantilla como {{full_name}} o
+    // {{custom_question_1}} cuando abre una URL de un sitio EXTERNO (esos
+    // tokens solo funcionan dentro del ecosistema de Meta, no en redirects a
+    // un sitio web). Por eso a veces llegan LITERALES en la URL. Si detectamos
+    // un token sin sustituir lo eliminamos, para no propagar "{{...}}" hasta
+    // el saludo del bot (que es justo lo que se veia roto en la prueba).
+    if (v.indexOf("{{") >= 0 && v.indexOf("}}") >= 0) {
+      v = v.replace(/\{\{[^}]*\}\}/g, " ").replace(/\s+/g, " ").trim();
+    }
     // El Message Handler en Deluge parsea el payload usando '|' como separador
     // y '=' como delimitador clave/valor. Neutralizamos esos caracteres dentro
     // de los valores para no romper el parseo aguas abajo.

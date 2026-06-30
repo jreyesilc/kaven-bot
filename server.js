@@ -797,22 +797,38 @@ function metaStoreGet({ phone, name }) {
 }
 
 // Guardar el contexto de un lead de Meta (lo llama la landing al cargar)
+// Meta NO sustituye tokens de plantilla como {{full_name}} o
+// {{custom_question_1}} en URLs de sitios externos: llegan literales. Esta
+// funcion elimina cualquier token sin sustituir para que NUNCA se almacene
+// ni se propague "{{...}}" hacia el saludo del bot.
+function stripMetaTemplateTokens(v) {
+  if (v === null || v === undefined) return "";
+  let s = ("" + v).trim();
+  if (s.indexOf("{{") >= 0 && s.indexOf("}}") >= 0) {
+    s = s.replace(/\{\{[^}]*\}\}/g, " ").replace(/\s+/g, " ").trim();
+  }
+  return s;
+}
+
 app.post("/meta-context", (req, res) => {
   try {
     const b = req.body || {};
     const data = {
-      name: b.name || "",
-      phone: b.phone || "",
-      email: b.email || "",
-      sport: b.sport || "",
-      quantity: b.quantity || "",
-      date: b.date || "",
-      design: b.design || "",
-      lead_id: b.lead_id || "",
-      campaign: b.campaign || "",
+      name: stripMetaTemplateTokens(b.name),
+      phone: stripMetaTemplateTokens(b.phone),
+      email: stripMetaTemplateTokens(b.email),
+      sport: stripMetaTemplateTokens(b.sport),
+      quantity: stripMetaTemplateTokens(b.quantity),
+      date: stripMetaTemplateTokens(b.date),
+      design: stripMetaTemplateTokens(b.design),
+      lead_id: stripMetaTemplateTokens(b.lead_id),
+      campaign: stripMetaTemplateTokens(b.campaign),
       lang: b.lang || "es",
       savedAt: new Date().toISOString()
     };
+    // Tras limpiar tokens, si no quedan datos utiles (ni nombre ni telefono
+    // reales), NO guardamos contexto: el bot usara su flujo normal en lugar
+    // de saludar con datos vacios/rotos.
     if (!data.name && !data.phone) {
       return res.json({ ok: false, error: "missing_name_and_phone" });
     }

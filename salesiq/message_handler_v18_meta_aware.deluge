@@ -248,13 +248,57 @@ if(metaRaw != null && metaRaw.indexOf("META") == 0)
                         }
                 }
         }
-        // Persistir para recordar el contexto durante todo el chat.
-        metaSave = Map();
-        metaSave.put("meta_payload",metaRaw);
-        metaSave.put("meta_lead","true");
-        zoho.salesiq.visitorsession.set(portalName,metaSave);
-        // Un lead de Meta YA entrego sus datos: NUNCA mostramos el formulario.
-        captured = "true";
+        // --- v18.1: BLINDAJE contra tokens {{...}} sin sustituir ---
+        // Meta NO reemplaza {{full_name}} ni {{custom_question_X}} cuando abre
+        // una URL de un sitio EXTERNO: llegan literales. Si algun valor sigue
+        // siendo una plantilla sin sustituir, lo descartamos para no mostrar
+        // texto roto en el saludo del bot.
+        if(metaName.contains("{{"))
+        {
+                metaName = "";
+        }
+        if(metaPhone.contains("{{"))
+        {
+                metaPhone = "";
+        }
+        if(metaEmail.contains("{{"))
+        {
+                metaEmail = "";
+        }
+        if(metaSport.contains("{{"))
+        {
+                metaSport = "";
+        }
+        if(metaQty.contains("{{"))
+        {
+                metaQty = "";
+        }
+        if(metaDate.contains("{{"))
+        {
+                metaDate = "";
+        }
+        if(metaDesign.contains("{{"))
+        {
+                metaDesign = "";
+        }
+        // Si tras limpiar NO quedan datos reales (ni nombre ni telefono), este
+        // "lead de Meta" no trae informacion util (tokens sin sustituir).
+        // Degradamos al flujo normal: se mostrara el formulario y se capturara
+        // en el sitio, en lugar de enviar un saludo vacio/roto.
+        if(metaName == "" && metaPhone == "")
+        {
+                isMetaLead = false;
+        }
+        if(isMetaLead)
+        {
+                // Persistir para recordar el contexto durante todo el chat.
+                metaSave = Map();
+                metaSave.put("meta_payload",metaRaw);
+                metaSave.put("meta_lead","true");
+                zoho.salesiq.visitorsession.set(portalName,metaSave);
+                // Un lead de Meta YA entrego sus datos: NUNCA mostramos el formulario.
+                captured = "true";
+        }
 }
 
 // --- 5) Estado: ¿ya saludamos a este lead de Meta? ---
@@ -341,10 +385,17 @@ if(isMetaLead && metaGreeted != "true")
 
         // --- Construir saludo personalizado (bilingue) ---
         greetName = metaName;
+        // Saludo seguro: si no tenemos un nombre real (p.ej. llego un token sin
+        // sustituir y lo limpiamos), saludamos SIN nombre en lugar de "¡Hola !".
+        nameSuffix = "";
+        if(greetName != "")
+        {
+                nameSuffix = " " + greetName;
+        }
         metaReply = "";
         if(metaLang == "en")
         {
-                metaReply = "Hi " + greetName + "! 👋 I'm the Kaven Sports assistant. ";
+                metaReply = "Hi" + nameSuffix + "! 👋 I'm the Kaven Sports assistant. ";
                 if(metaSport != "")
                 {
                         metaReply = metaReply + "I can see you already shared your info with us about " + metaSport + " — thank you so much! ";
@@ -376,7 +427,7 @@ if(isMetaLead && metaGreeted != "true")
         }
         else
         {
-                metaReply = "¡Hola " + greetName + "! 👋 Soy el asistente de Kaven Sports. ";
+                metaReply = "¡Hola" + nameSuffix + "! 👋 Soy el asistente de Kaven Sports. ";
                 if(metaSport != "")
                 {
                         metaReply = metaReply + "Vi que ya nos compartiste tu informacion para " + metaSport + " — ¡mil gracias! ";
