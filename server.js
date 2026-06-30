@@ -727,6 +727,96 @@ async function crearLeadCompleto({ name, email, phone, signals, message, uniform
 }
 
 //////////////////////////////////////////////////////
+// ✅ BÚSQUEDA DE LEADS EN ZOHO CRM (para contexto de Meta)
+//////////////////////////////////////////////////////
+// Busca leads en el CRM de Zoho por teléfono o nombre, y extrae el contexto
+// (deporte, cantidad, fecha, diseño) del campo Description. Esto permite al
+// bot recuperar datos de leads que llegaron vía LeadChain de Meta sin
+// necesitar la Graph API de Meta (que requiere App Review de leads_retrieval).
+async function searchZohoLeadsByContact(phone, name) {
+  try {
+    const token = await refreshZohoToken();
+    if (!token) {
+      console.log("⚠️ No hay token de Zoho para buscar leads");
+      return null;
+    }
+
+    // Normalizar teléfono (últimos 10 dígitos, como hace metaStoreGet)
+    let phoneNorm = "";
+    if (phone) {
+      const digits = ("" + phone).replace(/\D/g, "");
+      phoneNorm = digits.slice(-10);
+    }
+
+    // Construir criterio de búsqueda (teléfono O nombre)
+    let criteria = "";
+    if (phoneNorm) {
+      criteria = `(Phone:equals:${phoneNorm})`;
+    }
+    if (name) {
+      const nameClean = ("" + name).trim();
+      if (nameClean) {
+        const nameCriteria = `(Last_Name:equals:${nameClean})`;
+        criteria = criteria ? `(${criteria}or${nameCriteria})` : nameCriteria;
+      }
+    }
+
+    if (!criteria) {
+      console.log("⚠️ searchZohoLeadsByContact: sin teléfono ni nombre");
+      return null;
+    }
+
+    const resp = await axios.get("https://www.zohoapis.com/crm/v2/Leads/search", {
+      params: { criteria, fields: "Last_Name,Phone,Email,Description,Lead_Source,Created_Time" },
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+      timeout: 8000
+    });
+
+    const leads = (resp.data && resp.data.data) || [];
+    if (leads.length === 0) {
+      console.log("🔍 searchZohoLeadsByContact: sin resultados en CRM para", { phone: phoneNorm, name });
+      return null;
+    }
+
+    // Tomar el más reciente
+    const lead = leads[0];
+    console.log(`🔍 Lead encontrado en CRM: ${lead.Last_Name} (${lead.Phone || lead.Email}) - fuente: ${lead.Lead_Source || "n/a"}`);
+
+    // Parsear Description para extraer deporte, cantidad, fecha, diseño
+    // Formato esperado: "Datos del formulario (anuncio ciclismo) -> Productos de interés: X | Cantidad/Pedido: Y | Fecha de entrega: Z | Diseño: W"
+    const desc = lead.Description || "";
+    const extracted = {
+      name: lead.Last_Name || "",
+      phone: lead.Phone || "",
+      email: lead.Email || "",
+      sport: "",
+      quantity: "",
+      date: "",
+      design: "",
+      lead_source: lead.Lead_Source || "",
+      created_time: lead.Created_Time || ""
+    };
+
+    // Regex para capturar cada campo del bloque "Datos del formulario"
+    const sportMatch = desc.match(/Productos de interés:\s*([^|]+)/i);
+    const qtyMatch = desc.match(/Cantidad\/Pedido:\s*([^|]+)/i);
+    const dateMatch = desc.match(/Fecha de entrega:\s*([^|]+)/i);
+    const designMatch = desc.match(/Diseño:\s*([^|]+)/i);
+
+    if (sportMatch) extracted.sport = sportMatch[1].trim();
+    if (qtyMatch) extracted.quantity = qtyMatch[1].trim();
+    if (dateMatch) extracted.date = dateMatch[1].trim();
+    if (designMatch) extracted.design = designMatch[1].trim();
+
+    return extracted;
+  } catch (err) {
+    const detail = err.response ? JSON.stringify(err.response.data) : err.message;
+    console.log("🔥 Error buscando lead en Zoho CRM:", detail);
+    return null;
+  }
+}
+
+//////////////////////////////////////////////////////
 // ✅ META LEAD CONTEXT STORE (v18 - handoff sin preguntas duplicadas)
 //////////////////////////////////////////////////////
 //
@@ -870,6 +960,47 @@ app.get("/meta-context", (req, res) => {
     return res.json({ ok: true, isMeta: true, context: data });
   } catch (err) {
     console.log("🔥 GET /meta-context error:", err.message);
+    return res.json({ ok: false, isMeta: false, error: err.message });
+  }
+});
+
+// --- GET /crm-context : consulta el CRM de Zoho para recuperar contexto ---
+// Alternativa al webhook de Meta Graph API (que requiere App Review de
+// leads_retrieval). Los leads que llegan via LeadChain de Meta ya estan
+// completos en el CRM con deporte/cantidad/fecha/diseño en Description.
+app.get("/crm-context", async (req, res) => {
+  try {
+    const { phone, name } = req.query;
+    if (!phone && !name) {
+      return res.json({ ok: false, isMeta: false, message: "phone o name requeridos" });
+    }
+
+    const lead = await searchZohoLeadsByContact(phone, name);
+    if (!lead) {
+      return res.json({ ok: false, isMeta: false, message: "lead no encontrado en CRM" });
+    }
+
+    // Determinar si es lead de Meta por Lead_Source
+    const isMeta = (lead.lead_source || "").toLowerCase().indexOf("meta") >= 0 ||
+                   (lead.lead_source || "").toLowerCase().indexOf("facebook") >= 0 ||
+                   (lead.lead_source || "").toLowerCase().indexOf("instagram") >= 0;
+
+    return res.json({
+      ok: true,
+      isMeta,
+      source: isMeta ? "crm-meta" : "crm-other",
+      name: lead.name,
+      phone: lead.phone,
+      email: lead.email,
+      sport: lead.sport,
+      quantity: lead.quantity,
+      date: lead.date,
+      design: lead.design,
+      lead_source: lead.lead_source,
+      created_time: lead.created_time
+    });
+  } catch (err) {
+    console.log("🔥 GET /crm-context error:", err.message);
     return res.json({ ok: false, isMeta: false, error: err.message });
   }
 });

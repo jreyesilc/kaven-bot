@@ -343,6 +343,70 @@
   }
 
   // ---------------------------------------------------------------------------
+  // 3.c) RESPALDO POR CRM DE ZOHO (sin App Review de Meta)
+  // ---------------------------------------------------------------------------
+  // Si el visitante NO viene de Meta (URL sin source=meta*), pero tenemos
+  // nombre o teléfono guardado (de una sesión anterior), consultamos el CRM
+  // de Zoho para ver si es un lead que llegó vía LeadChain de Meta. Esto
+  // permite recuperar el contexto completo sin necesitar la Graph API de Meta
+  // (que requiere App Review de leads_retrieval).
+  function fetchFromCRM(name, phone, callback) {
+    if (!name && !phone) {
+      log("fetchFromCRM: sin nombre ni teléfono, omitiendo");
+      if (callback) callback(null);
+      return;
+    }
+
+    var url = BACKEND_URL + "/crm-context?";
+    if (phone) url += "phone=" + encodeURIComponent(phone) + "&";
+    if (name) url += "name=" + encodeURIComponent(name);
+
+    log("Consultando CRM de Zoho para enriquecer contexto...");
+
+    if (window.fetch) {
+      window.fetch(url, { method: "GET", mode: "cors", timeout: 8000 })
+        .then(function (response) { return response.json(); })
+        .then(function (result) {
+          if (result.ok && result.isMeta) {
+            log("✅ Lead de Meta encontrado en CRM:", result);
+            if (callback) callback(result);
+          } else {
+            log("CRM: sin contexto de Meta para este visitante");
+            if (callback) callback(null);
+          }
+        })
+        .catch(function (e) {
+          log("Error consultando CRM:", e);
+          if (callback) callback(null);
+        });
+    } else {
+      // Respaldo XMLHttpRequest para navegadores antiguos
+      var xhr = new XMLHttpRequest();
+      xhr.open("GET", url, true);
+      xhr.onreadystatechange = function () {
+        if (xhr.readyState === 4) {
+          if (xhr.status === 200) {
+            try {
+              var result = JSON.parse(xhr.responseText);
+              if (result.ok && result.isMeta) {
+                log("✅ Lead de Meta encontrado en CRM:", result);
+                if (callback) callback(result);
+              } else {
+                if (callback) callback(null);
+              }
+            } catch (e) {
+              if (callback) callback(null);
+            }
+          } else {
+            if (callback) callback(null);
+          }
+        }
+      };
+      xhr.send();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // 4) API GLOBAL  (window.KavenMetaLead)
   // ---------------------------------------------------------------------------
   function buildGlobalApi(data) {
@@ -400,6 +464,43 @@
       // Canal confiable (v18): registrar el contexto en el backend para que
       // el handler Deluge lo recupere por nombre/telefono.
       postToBackend(finalData);
+    } else {
+      // Visitante directo/orgánico: intentar enriquecer desde el CRM de Zoho.
+      // Si este visitante es un lead que previamente llegó vía Meta LeadChain,
+      // el CRM tiene el contexto completo (deporte/cantidad/fecha/diseño en
+      // Description). Esto evita volver a preguntar en futuras sesiones.
+      // Buscamos por nombre/teléfono que pueda haber quedado de sesiones
+      // anteriores en storage.
+      var lookupName = (stored && stored.name) || "";
+      var lookupPhone = (stored && stored.phone) || "";
+      
+      if (lookupName || lookupPhone) {
+        fetchFromCRM(lookupName, lookupPhone, function (crmData) {
+          if (crmData) {
+            // Transformar respuesta del CRM al formato de finalData
+            var enrichedData = {
+              source: "crm-meta",
+              lead_id: "",
+              campaign: "",
+              name: crmData.name || lookupName,
+              email: crmData.email || "",
+              phone: crmData.phone || lookupPhone,
+              sport: crmData.sport || "",
+              quantity: crmData.quantity || "",
+              date: crmData.date || "",
+              design: crmData.design || "",
+              lang: (stored && stored.lang) || "es",
+              captured_at: new Date().toISOString()
+            };
+            writeStored(enrichedData);
+            window.KavenMetaLead = buildGlobalApi(enrichedData);
+            injectWhenReady(enrichedData);
+            // Registrar en el backend también
+            postToBackend(enrichedData);
+            log("Contexto enriquecido desde CRM de Zoho", enrichedData);
+          }
+        });
+      }
     }
   }
 
