@@ -20,7 +20,7 @@
  * COMPATIBILIDAD
  *   - Vanilla JS (sin dependencias). Compatible con todos los navegadores
  *     modernos. Se puede pegar en el <head> de la landing o cargar como
- *     archivo externo:  <script src="/js/meta-lead-context.js" defer></script>
+ *     archivo externo:  <script src="/js/meta-lead-context.js" defer><\/script>
  *   - Debe cargarse DESPUES (o junto) del snippet de Zoho SalesIQ. El script
  *     espera de forma segura a que $zoho.salesiq este listo antes de inyectar.
  *
