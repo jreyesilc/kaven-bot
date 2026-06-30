@@ -316,11 +316,26 @@ if(isMetaLead && metaGreeted != "true")
                 // Si fallara el alta, el chat continua igual; se revisa manual.
         }
 
-        // --- Elegir el catalogo correcto segun el deporte ---
+        // --- Elegir el catalogo correcto segun el deporte E IDIOMA ---
         sportLow = metaSport.toLowerCase();
-        catalogUrl = "https://www.kavensports.com/cycling-catalog";
-        if(metaSport != "" && sportLow.indexOf("cicl") < 0 && sportLow.indexOf("cycl") < 0 && sportLow.indexOf("bike") < 0)
+        // Determinar si es ciclismo
+        isCycling = (metaSport != "" && (sportLow.indexOf("cicl") >= 0 || sportLow.indexOf("cycl") >= 0 || sportLow.indexOf("bike") >= 0));
+        // Elegir URL según idioma y deporte
+        if(isCycling)
         {
+                // Ciclismo: catálogo específico en español o inglés
+                if(metaLang == "en")
+                {
+                        catalogUrl = "https://www.kavensports.com/cycling-catalog";
+                }
+                else
+                {
+                        catalogUrl = "https://www.kavensports.com/catalogo-ciclismo";
+                }
+        }
+        else
+        {
+                // Otros deportes: home page
                 catalogUrl = "https://kavensports.com";
         }
 

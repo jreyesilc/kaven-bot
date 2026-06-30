@@ -118,6 +118,24 @@
       captured_at: new Date().toISOString()
     };
 
+    // Autodetectar idioma desde la URL de la página si no viene explícito
+    if (!data.lang || data.lang === "") {
+      var path = window.location.pathname.toLowerCase();
+      // Si la URL contiene "catalogo" o "cotizacion" -> español
+      // Si contiene "catalog", "quote", "cycling-catalog" -> inglés
+      if (path.indexOf("catalogo") >= 0 || path.indexOf("cotizacion") >= 0) {
+        data.lang = "es";
+        log("Idioma auto-detectado desde URL (catalogo): español");
+      } else if (path.indexOf("catalog") >= 0 || path.indexOf("cycling") >= 0) {
+        data.lang = "en";
+        log("Idioma auto-detectado desde URL (catalog/cycling): inglés");
+      } else {
+        // Fallback: español por defecto
+        data.lang = "es";
+        log("Idioma por defecto: español");
+      }
+    }
+
     return data;
   }
 
