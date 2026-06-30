@@ -2,10 +2,18 @@ const express = require("express");
 const axios = require("axios");
 const OpenAI = require("openai");
 const cors = require("cors");
+const crypto = require("crypto");
 const rag = require("./rag/rag");
 
 const app = express();
-app.use(express.json());
+// Guardamos el cuerpo CRUDO de cada request para poder validar la firma
+// X-Hub-Signature-256 que Meta envia en los webhooks (HMAC-SHA256 del body
+// con el App Secret). Sin el body exacto, la firma no se puede verificar.
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 app.use(cors());
 
 console.log("🚀 Starting server...");
@@ -772,8 +780,12 @@ function metaStoreSet(data) {
   const entry = { data, expiresAt };
   const phoneKey = normalizePhone(data.phone);
   const nameKey = normalizeName(data.name);
+  const leadKey = (data.lead_id || "").toString().trim();
   if (phoneKey) metaContextStore.set("p:" + phoneKey, entry);
   if (nameKey) metaContextStore.set("n:" + nameKey, entry);
+  // Indexamos tambien por lead_id de Meta (clave unica y confiable que llega
+  // por el webhook). Permite recuperar el contexto exacto cuando se conoce.
+  if (leadKey) metaContextStore.set("l:" + leadKey, entry);
   // Limpieza oportunista de entradas vencidas
   const now = Date.now();
   for (const [k, v] of metaContextStore) {
@@ -781,12 +793,16 @@ function metaStoreSet(data) {
   }
 }
 
-function metaStoreGet({ phone, name }) {
+function metaStoreGet({ phone, name, lead_id }) {
   const now = Date.now();
   const phoneKey = normalizePhone(phone);
   const nameKey = normalizeName(name);
+  const leadKey = (lead_id || "").toString().trim();
   let entry = null;
-  if (phoneKey && metaContextStore.has("p:" + phoneKey)) {
+  // Prioridad: lead_id (exacto) > telefono > nombre.
+  if (leadKey && metaContextStore.has("l:" + leadKey)) {
+    entry = metaContextStore.get("l:" + leadKey);
+  } else if (phoneKey && metaContextStore.has("p:" + phoneKey)) {
     entry = metaContextStore.get("p:" + phoneKey);
   } else if (nameKey && metaContextStore.has("n:" + nameKey)) {
     entry = metaContextStore.get("n:" + nameKey);
@@ -846,7 +862,8 @@ app.get("/meta-context", (req, res) => {
   try {
     const phone = (req.query && req.query.phone) || "";
     const name = (req.query && req.query.name) || "";
-    const data = metaStoreGet({ phone, name });
+    const lead_id = (req.query && (req.query.lead_id || req.query.leadgen_id)) || "";
+    const data = metaStoreGet({ phone, name, lead_id });
     if (!data) {
       return res.json({ ok: true, isMeta: false });
     }
@@ -854,6 +871,243 @@ app.get("/meta-context", (req, res) => {
   } catch (err) {
     console.log("🔥 GET /meta-context error:", err.message);
     return res.json({ ok: false, isMeta: false, error: err.message });
+  }
+});
+
+//////////////////////////////////////////////////////
+// ✅ WEBHOOK DE META LEAD ADS  (v19 - captura server-to-server confiable)
+//////////////////////////////////////////////////////
+//
+// POR QUE ESTO ES LO CORRECTO:
+//   Los Formularios Instantaneos de Meta NO pueden pasar los datos del lead
+//   (nombre, telefono, respuestas) a la URL de un sitio externo: el leadgen_id
+//   se genera DESPUES de enviar el formulario. Por eso el enfoque de tokens
+//   en la URL (?name={{full_name}}) nunca podia funcionar.
+//
+//   La forma profesional y 100% confiable es el WEBHOOK servidor-a-servidor:
+//     1. El usuario envia el Instant Form en Meta.
+//     2. Meta hace POST a  /webhook/meta  con el  leadgen_id  (sin datos).
+//     3. Nuestro backend consulta la Graph API con ese id + Page Access Token
+//        y obtiene TODOS los campos del formulario (en tiempo real, ~1-3s).
+//     4. Guardamos el contexto en  metaContextStore  (indexado por lead_id,
+//        telefono y nombre). Asi el Zobot puede recuperarlo despues.
+//
+// VARIABLES DE ENTORNO REQUERIDAS (configurar en Render):
+//   META_VERIFY_TOKEN       -> cadena secreta que tu eliges (la misma que pones
+//                              en el panel de Meta al suscribir el webhook).
+//   META_PAGE_ACCESS_TOKEN  -> token de acceso de la Pagina con permiso
+//                              leads_retrieval (idealmente de larga duracion).
+//   META_APP_SECRET         -> App Secret (para validar la firma X-Hub-Signature).
+//   META_GRAPH_VERSION      -> opcional, por defecto "v21.0".
+//   META_WEBHOOK_CREATE_CRM -> opcional, "true" para crear el lead en CRM desde
+//                              el webhook. Por defecto OFF para NO duplicar con
+//                              la integracion nativa LeadChain (que ya crea leads).
+//////////////////////////////////////////////////////
+
+const META_GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v21.0";
+
+// Valida la firma X-Hub-Signature-256 que Meta envia (HMAC-SHA256 del body
+// crudo con el App Secret). Si no hay App Secret configurado, se omite (con un
+// aviso en logs) para no bloquear pruebas, pero en produccion DEBE configurarse.
+function verifyMetaSignature(req) {
+  const appSecret = process.env.META_APP_SECRET;
+  if (!appSecret) {
+    console.log("⚠️ META_APP_SECRET no configurado: se omite verificacion de firma");
+    return true;
+  }
+  try {
+    const signature = req.get("x-hub-signature-256") || "";
+    if (!signature.startsWith("sha256=")) return false;
+    const expected = "sha256=" + crypto
+      .createHmac("sha256", appSecret)
+      .update(req.rawBody || Buffer.from(""))
+      .digest("hex");
+    // Comparacion en tiempo constante para evitar timing attacks.
+    const sigBuf = Buffer.from(signature);
+    const expBuf = Buffer.from(expected);
+    if (sigBuf.length !== expBuf.length) return false;
+    return crypto.timingSafeEqual(sigBuf, expBuf);
+  } catch (e) {
+    console.log("🔥 Error verificando firma de Meta:", e.message);
+    return false;
+  }
+}
+
+// Mapea el arreglo field_data del Instant Form a nuestro esquema interno.
+// Los campos estandar de Meta son: full_name, first_name, last_name, email,
+// phone_number. Las preguntas personalizadas llegan con el nombre derivado del
+// texto de la pregunta, asi que las mapeamos por PALABRAS CLAVE (heuristica
+// tolerante a mayusculas/acentos/idioma es-en).
+function mapMetaFieldData(fieldData) {
+  const out = {
+    name: "", first_name: "", last_name: "", email: "", phone: "",
+    sport: "", quantity: "", date: "", design: ""
+  };
+  if (!Array.isArray(fieldData)) return out;
+
+  const norm = (s) => ("" + (s || ""))
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[_\-]+/g, " ")
+    .trim();
+
+  for (const f of fieldData) {
+    const key = norm(f && f.name);
+    const val = (f && Array.isArray(f.values) && f.values.length) ? ("" + f.values[0]).trim() : "";
+    if (!val) continue;
+
+    // --- Campos estandar ---
+    if (key === "full name" || key === "nombre completo") { out.name = val; continue; }
+    if (key === "first name" || key === "nombre") { out.first_name = val; continue; }
+    if (key === "last name" || key === "apellidos" || key === "apellido") { out.last_name = val; continue; }
+    if (key === "email" || key.indexOf("correo") >= 0 || key.indexOf("e mail") >= 0) { out.email = val; continue; }
+    if (key === "phone number" || key.indexOf("telefono") >= 0 || key.indexOf("phone") >= 0 || key.indexOf("celular") >= 0 || key.indexOf("whatsapp") >= 0) { out.phone = val; continue; }
+
+    // --- Preguntas personalizadas (por palabras clave) ---
+    // IMPORTANTE: el orden importa. Revisamos cantidad/fecha/diseno ANTES que
+    // deporte, porque preguntas como "¿Cuántos uniformes necesitas?" o
+    // "How many uniforms?" contienen la palabra "uniforme/uniform" (deporte)
+    // pero en realidad preguntan por la CANTIDAD.
+    // Cantidad / numero de personas
+    if (key.indexOf("cuant") >= 0 || key.indexOf("personas") >= 0 || key.indexOf("cantidad") >= 0 || key.indexOf("quantity") >= 0 || key.indexOf("how many") >= 0 || key.indexOf("piezas") >= 0) { out.quantity = val; continue; }
+    // Fecha / cuando lo necesita
+    if (key.indexOf("cuando") >= 0 || key.indexOf("fecha") >= 0 || key.indexOf("date") >= 0 || key.indexOf("when") >= 0 || key.indexOf("entrega") >= 0) { out.date = val; continue; }
+    // Diseño / logo
+    if (key.indexOf("diseno") >= 0 || key.indexOf("design") >= 0 || key.indexOf("logo") >= 0) { out.design = val; continue; }
+    // Deporte / tipo de uniforme (mas generico, se evalua al final)
+    if (key.indexOf("uniforme") >= 0 || key.indexOf("deporte") >= 0 || key.indexOf("sport") >= 0 || key.indexOf("uniform") >= 0) { out.sport = val; continue; }
+  }
+
+  // Construir nombre completo si solo vinieron first/last.
+  if (!out.name) {
+    const composed = [out.first_name, out.last_name].filter(Boolean).join(" ").trim();
+    if (composed) out.name = composed;
+  }
+  return out;
+}
+
+// Consulta la Graph API para obtener los datos completos de un lead por su id.
+async function fetchMetaLead(leadgenId) {
+  const token = process.env.META_PAGE_ACCESS_TOKEN;
+  if (!token) {
+    console.log("⚠️ META_PAGE_ACCESS_TOKEN no configurado: no se puede consultar el lead");
+    return null;
+  }
+  const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${leadgenId}`;
+  const resp = await axios.get(url, {
+    params: { access_token: token, fields: "id,created_time,field_data,form_id,ad_id,campaign_id" },
+    timeout: 8000
+  });
+  return resp.data;
+}
+
+// Procesa un leadgen_id: lo consulta, mapea sus campos y guarda el contexto.
+async function processLeadgen(leadgenId) {
+  try {
+    const raw = await fetchMetaLead(leadgenId);
+    if (!raw) return null;
+    const mapped = mapMetaFieldData(raw.field_data);
+    const data = {
+      name: stripMetaTemplateTokens(mapped.name),
+      phone: stripMetaTemplateTokens(mapped.phone),
+      email: stripMetaTemplateTokens(mapped.email),
+      sport: stripMetaTemplateTokens(mapped.sport),
+      quantity: stripMetaTemplateTokens(mapped.quantity),
+      date: stripMetaTemplateTokens(mapped.date),
+      design: stripMetaTemplateTokens(mapped.design),
+      lead_id: leadgenId,
+      campaign: raw.campaign_id || "",
+      lang: "es",
+      source: "meta-webhook",
+      savedAt: new Date().toISOString()
+    };
+    if (!data.name && !data.phone) {
+      console.log("⚠️ Webhook lead sin nombre ni telefono utiles:", leadgenId);
+      return data;
+    }
+    metaStoreSet(data);
+    console.log("📥 Webhook lead guardado en contexto:", JSON.stringify(data));
+
+    // Opcional: crear el lead en CRM desde el webhook. Por defecto OFF para
+    // NO duplicar con la integracion nativa LeadChain.
+    if ((process.env.META_WEBHOOK_CREATE_CRM || "").toLowerCase() === "true") {
+      try {
+        await axios.post("http://localhost:" + (process.env.PORT || 3000) + "/lead", {
+          name: data.name,
+          phone: data.phone,
+          products: data.sport || "No especificado (lead de Meta)",
+          quantity: data.quantity,
+          deadline: data.date,
+          design: data.design,
+          message: "Lead de Meta (webhook leadgen). Datos completos via Graph API.",
+          lead_source: "Meta"
+        });
+        console.log("✅ Lead de webhook creado en CRM:", leadgenId);
+      } catch (eCrm) {
+        console.log("🔥 Error creando lead de webhook en CRM:", eCrm.message);
+      }
+    }
+    return data;
+  } catch (err) {
+    const detail = err.response ? JSON.stringify(err.response.data) : err.message;
+    console.log("🔥 Error procesando leadgen " + leadgenId + ":", detail);
+    return null;
+  }
+}
+
+// --- GET /webhook/meta : verificacion del webhook (handshake con Meta) ---
+app.get("/webhook/meta", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+  const expected = process.env.META_VERIFY_TOKEN || "";
+  if (mode === "subscribe" && token && token === expected) {
+    console.log("✅ Webhook de Meta verificado correctamente");
+    return res.status(200).send(challenge);
+  }
+  console.log("⛔ Verificacion de webhook fallida (token no coincide)");
+  return res.sendStatus(403);
+});
+
+// --- POST /webhook/meta : notificacion de nuevo lead ---
+app.post("/webhook/meta", async (req, res) => {
+  // Validar firma antes de procesar.
+  if (!verifyMetaSignature(req)) {
+    console.log("⛔ Firma de webhook invalida");
+    return res.sendStatus(403);
+  }
+  // Responder 200 de inmediato (Meta exige respuesta rapida); procesamos luego.
+  res.sendStatus(200);
+
+  try {
+    const body = req.body || {};
+    if (body.object !== "page") return;
+    const entries = Array.isArray(body.entry) ? body.entry : [];
+    for (const entry of entries) {
+      const changes = Array.isArray(entry.changes) ? entry.changes : [];
+      for (const change of changes) {
+        if (change.field !== "leadgen") continue;
+        const value = change.value || {};
+        const leadgenId = value.leadgen_id || value.leadId || "";
+        if (!leadgenId) continue;
+        // Procesar en segundo plano (no bloquea la respuesta ya enviada).
+        processLeadgen(leadgenId);
+      }
+    }
+  } catch (err) {
+    console.log("🔥 Error en POST /webhook/meta:", err.message);
+  }
+});
+
+// Endpoint de diagnostico: procesar manualmente un leadgen_id (para pruebas
+// con la Lead Ads Testing Tool sin esperar al webhook real).
+app.get("/webhook/meta/test/:leadId", async (req, res) => {
+  try {
+    const data = await processLeadgen(req.params.leadId);
+    return res.json({ ok: true, data });
+  } catch (err) {
+    return res.json({ ok: false, error: err.message });
   }
 });
 
