@@ -132,6 +132,28 @@
 
 ## 🔗 Integraciones
 
+### 0. Webhook server-a-servidor de Meta Lead Ads (la forma profesional) ⭐ **NUEVO**
+**Fecha:** 30 de junio, 2026 | **Tipo:** Integración / Backend | **Estado:** ✅ IMPLEMENTADO EN CÓDIGO · ⏳ Pendiente configurar App de Meta + env vars
+
+📄 [Ver guía completa](integraciones/meta_webhook_setup.md) ⭐ **NUEVO**
+
+**Por qué:**
+- Meta **NO** puede pasar `leadgen_id` ni los datos del Instant Form dentro de la URL del botón al sitio web (el id se genera *después* del envío). La única vía confiable es el **webhook servidor-a-servidor**.
+
+**Solución (en `server.js`):**
+- `GET /webhook/meta` (handshake `hub.verify_token`) y `POST /webhook/meta` (recibe `leadgen`).
+- `verifyMetaSignature()` valida `X-Hub-Signature-256` (HMAC-SHA256 con `META_APP_SECRET`).
+- `fetchMetaLead()` consulta la Graph API; `mapMetaFieldData()` mapea campos ES/EN (con orden cantidad→deporte para evitar la colisión "uniformes"/cantidad).
+- `processLeadgen()` consulta → mapea → limpia tokens → guarda contexto (indexado por **lead_id**, teléfono y nombre).
+- `GET /webhook/meta/test/:leadId` para diagnóstico manual.
+- CRM opcional vía `META_WEBHOOK_CREATE_CRM` (default **off**; la LeadChain nativa ya crea los leads).
+
+**Env vars en Render:** `META_VERIFY_TOKEN`, `META_PAGE_ACCESS_TOKEN`, `META_APP_SECRET`, `META_GRAPH_VERSION` (opc.), `META_WEBHOOK_CREATE_CRM` (opc.).
+
+**Pendiente para producción:** crear/configurar App de Meta, suscribir campo `leadgen`, obtener Page Access Token con `leads_retrieval`, configurar env vars en Render, probar con la Lead Ads Testing Tool. (Pasos detallados en la guía.)
+
+---
+
 ### 1. Handoff de Leads de Meta → Zobot (sin preguntas duplicadas)
 **Fecha:** 29 de junio, 2026 | **Tipo:** Integración / Conversión | **Estado:** ✅ IMPLEMENTADO · ⏳ Pendiente publicar
 
