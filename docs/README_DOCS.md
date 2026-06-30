@@ -132,25 +132,29 @@
 
 ## 🔗 Integraciones
 
-### 0. Webhook server-a-servidor de Meta Lead Ads (la forma profesional) ⭐ **NUEVO**
-**Fecha:** 30 de junio, 2026 | **Tipo:** Integración / Backend | **Estado:** ✅ IMPLEMENTADO EN CÓDIGO · ⏳ Pendiente configurar App de Meta + env vars
-
-📄 [Ver guía completa](integraciones/meta_webhook_setup.md) ⭐ **NUEVO**
+### 0. Integración CRM de Zoho para contexto de Meta (sin App Review) ✅ **EN PRODUCCIÓN**
+**Fecha:** 30 de junio, 2026 | **Tipo:** Integración / Backend | **Estado:** ✅ FUNCIONANDO EN PRODUCCIÓN (commit fcbd9ce)
 
 **Por qué:**
-- Meta **NO** puede pasar `leadgen_id` ni los datos del Instant Form dentro de la URL del botón al sitio web (el id se genera *después* del envío). La única vía confiable es el **webhook servidor-a-servidor**.
+- Meta **NO** puede pasar `leadgen_id` ni los datos del Instant Form dentro de la URL del botón al sitio web (el id se genera *después* del envío).
+- La integración nativa **LeadChain** de Zoho **ya extrae los datos completos** del lead de Meta y los guarda en el CRM (deporte, cantidad, fecha, diseño en campo `Description`).
+- El webhook servidor-a-servidor de Meta requiere **App Review** de `leads_retrieval` (varios días, política de privacidad, video demo, etc.).
 
-**Solución (en `server.js`):**
-- `GET /webhook/meta` (handshake `hub.verify_token`) y `POST /webhook/meta` (recibe `leadgen`).
-- `verifyMetaSignature()` valida `X-Hub-Signature-256` (HMAC-SHA256 con `META_APP_SECRET`).
-- `fetchMetaLead()` consulta la Graph API; `mapMetaFieldData()` mapea campos ES/EN (con orden cantidad→deporte para evitar la colisión "uniformes"/cantidad).
-- `processLeadgen()` consulta → mapea → limpia tokens → guarda contexto (indexado por **lead_id**, teléfono y nombre).
-- `GET /webhook/meta/test/:leadId` para diagnóstico manual.
-- CRM opcional vía `META_WEBHOOK_CREATE_CRM` (default **off**; la LeadChain nativa ya crea los leads).
+**Solución implementada (en `server.js` y `landing/meta-lead-context.js`):**
+- `searchZohoLeadsByContact(phone, name)` busca leads en el CRM de Zoho por teléfono o nombre.
+- `GET /crm-context?phone=X&name=X` endpoint para consultar contexto desde el CRM.
+- `landing/meta-lead-context.js` → función `fetchFromCRM()` que enriquece visitantes consultando el CRM en segundo plano.
+- Extrae deporte, cantidad, fecha y diseño parseando el campo `Description` del lead.
+- **Funciona YA, sin App Review**, reutilizando la integración LeadChain que ya está activa.
 
-**Env vars en Render:** `META_VERIFY_TOKEN`, `META_PAGE_ACCESS_TOKEN`, `META_APP_SECRET`, `META_GRAPH_VERSION` (opc.), `META_WEBHOOK_CREATE_CRM` (opc.).
+**Flujo:**
+1. Lead llena formulario de Meta → LeadChain crea lead en CRM con todos los datos.
+2. Lead entra al sitio web → `meta-lead-context.js` consulta `/crm-context` por teléfono/nombre.
+3. Si el lead existe en el CRM con `Lead_Source = Meta Ads` → el bot recupera el contexto completo y NO vuelve a preguntar.
 
-**Pendiente para producción:** crear/configurar App de Meta, suscribir campo `leadgen`, obtener Page Access Token con `leads_retrieval`, configurar env vars en Render, probar con la Lead Ads Testing Tool. (Pasos detallados en la guía.)
+**Validado en producción:** endpoint `/crm-context` encuentra leads reales de Meta en el CRM y devuelve el contexto (`isMeta=true`, `sport`, `quantity`, `date`, `design`).
+
+**Webhook de Meta (código listo, en pausa):** El código del webhook Graph API (`GET/POST /webhook/meta`, `fetchMetaLead`, `mapMetaFieldData`) quedó implementado y probado como respaldo futuro si decides hacer el App Review. Env vars ya configuradas: `META_VERIFY_TOKEN`, `META_APP_SECRET`, `META_GRAPH_VERSION`. Solo falta `META_PAGE_ACCESS_TOKEN` (requiere App Review). [Ver guía completa](integraciones/meta_webhook_setup.md)
 
 ---
 
