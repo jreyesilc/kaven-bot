@@ -3,7 +3,34 @@
 **Fecha:** 29 de junio, 2026
 **Tipo:** Integración / Optimización de conversión
 **Estado:** ✅ IMPLEMENTADO (código) · ⏳ PENDIENTE de publicar en producción
-**Componentes:** `landing/meta-lead-context.js` · `salesiq/message_handler_v17_meta_aware.deluge`
+**Componentes:** `landing/meta-lead-context.js` · `salesiq/message_handler_v18_meta_aware.deluge` · `server.js` (`/meta-context`)
+
+---
+
+## ⚠️ ACTUALIZACIÓN v18 — Detección mediada por backend (lee primero)
+
+La versión v17 dependía de leer un campo personalizado (`kvn_meta`) inyectado en
+SalesIQ con `$zoho.salesiq.visitor.info()`. **En pruebas se confirmó que Zoho
+SalesIQ NO entrega los campos personalizados al handler Deluge del Zobot** — solo
+entrega los campos estándar (nombre, teléfono, email). Por eso la detección v17
+nunca se activaba y el bot caía al flujo genérico re-preguntando todo.
+
+**Solución v18 (canal confiable, en producción):**
+1. `landing/meta-lead-context.js` ahora, además de inyectar los campos estándar,
+   hace `POST https://kaven-bot.onrender.com/meta-context` con todo el contexto
+   del lead de Meta.
+2. `server.js` expone `POST /meta-context` (guarda en memoria, indexado por
+   teléfono y nombre normalizados, TTL 24h) y `GET /meta-context?name=&phone=`.
+3. `salesiq/message_handler_v18_meta_aware.deluge` lee `visitor.get("name")` /
+   `visitor.get("phone")` (campos estándar que SÍ llegan) y consulta
+   `GET /meta-context`. Si el visitante es de Meta → saludo personalizado, sin
+   formulario, lead único en CRM. El resultado se cachea en la sesión del chat.
+
+Guía de publicación paso a paso: **`/home/ubuntu/INSTRUCCIONES_PUBLICAR_V18.md`**.
+
+> El resto de este documento describe el diseño original v17; el flujo y los
+> textos del saludo siguen vigentes, solo cambió **cómo** el handler descubre al
+> lead de Meta (backend en vez de campo personalizado).
 
 ---
 
