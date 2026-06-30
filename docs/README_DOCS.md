@@ -1,6 +1,6 @@
 # 📚 Documentación Kaven Sports Bot
 
-**Última actualización:** 29 de junio, 2026  
+**Última actualización:** 30 de junio, 2026  
 **Mantenido por:** Juan Reyes (Kaven Sports)  
 **Asistido por:** Abacus AI Agent  
 
@@ -10,7 +10,7 @@
 
 | Categoría | Documentos | Estado |
 |-----------|-----------|--------|
-| 🐛 **Bugs Resueltos** | 1 documento | Completo |
+| 🐛 **Bugs Resueltos** | 2 documentos | Completo |
 | ⚡ **Optimizaciones** | 2 documentos | Completo |
 | 🔗 **Integraciones** | 1 documento | Implementado (pend. publicar) |
 | ⚙️ **Configuración** | 1 documento | Pendiente |
@@ -39,6 +39,45 @@
 - Zoho SalesIQ no muestra errores de runtime, solo congela
 - Backend asíncrono mejora UX (respuesta inmediata)
 - Caché en memoria necesario por latencia de Zoho CRM
+
+---
+
+### 2. Leads de Meta No Llegaban a Zoho CRM (LeadChain)
+**Fecha:** 30 de junio, 2026 | **Severidad:** 🔴 CRÍTICO | **Estado:** ✅ RESUELTO
+
+📄 [Ver documentación completa](bugs_resueltos/2026-06-30_meta_leads_no_llegaban_crm.md)
+
+**Resumen:**
+- **Problema:** Leads de formularios de Meta (Facebook/Instagram) NO se registraban en Zoho CRM → **pérdida total de leads**
+- **Causa raíz:** Campos obligatorios (**Apellidos** y **Empresa**) sin mapear en LeadChain
+- **Solución:** Mapeo correcto de campos + recuperación de 67 leads perdidos
+- **Impacto:** 100% de leads de Meta ahora llegan al CRM automáticamente
+
+**Cadenas reparadas:**
+- "Kaven - Thinkser - ES" (Draft → Active, 5 leads recuperados)
+- "Kings - Thinkers-copy" (Mapeo incompleto → Completo, 63 leads recuperados)
+
+**Mapeo estándar establecido:**
+
+| Campo Zoho | Fuente Meta | Nota |
+|------------|-------------|------|
+| Apellidos ⚠️ | Full name | Obligatorio |
+| Empresa ⚠️ | "Kaven Sports - Meta" (estático) | Obligatorio |
+| Correo | Email | - |
+| Teléfono | Phone number | - |
+| Descripción | tipo + cantidad + fecha (máx. 3) | - |
+| Fuente | Meta Ads | Tracking |
+
+**Aprendizajes clave:**
+- LeadChain rechaza TODOS los leads si faltan campos obligatorios (sin notificar)
+- Cada formulario nuevo de Meta DEBE tener su propia LeadChain configurada
+- Mapeo 1-a-1: un campo de FB solo puede ir a UN campo de Zoho
+- Leads fallidos son recuperables vía botón "Sync Leads"
+- Monitoreo semanal recomendado (contador X/500, warnings)
+
+**Archivos de configuración (NO código):**
+- Zoho CRM → Configuración → Marketplace → Facebook → LeadChain
+- Sin cambios en `server.js` ni scripts Deluge
 
 ---
 
@@ -200,7 +239,8 @@ kaven-bot/
 ├── docs/                                    ← ESTÁS AQUÍ
 │   ├── README_DOCS.md                       ← Este archivo (índice maestro)
 │   ├── bugs_resueltos/
-│   │   └── 2026-06-27_bot_freeze_replaceall.md
+│   │   ├── 2026-06-27_bot_freeze_replaceall.md
+│   │   └── 2026-06-30_meta_leads_no_llegaban_crm.md
 │   ├── optimizaciones/
 │   │   ├── 2026-06-28_prompt_multi_deporte.md
 │   │   └── 2026-06-28_analisis_mejores_practicas_formularios.md
@@ -272,6 +312,23 @@ kaven-bot/
 - `2251944`: Análisis de mejores prácticas
 
 **Resultado:** Sistema estable en producción, roadmap de optimizaciones definido
+
+---
+
+### Sesión 2: 30 de junio, 2026
+**Temas cubiertos:**
+1. ✅ Diagnóstico de leads de Meta que no llegaban a CRM
+2. ✅ Identificación de causa raíz: LeadChain con campos obligatorios sin mapear
+3. ✅ Reparación de 2 cadenas activas con mapeo completo
+4. ✅ Recuperación de 67 leads perdidos (4 + 63)
+5. ✅ Establecimiento de estándar de mapeo para futuros formularios
+
+**Cambios realizados:**
+- Configuración en Zoho CRM → LeadChain (sin commits de código)
+- Documentación: `bugs_resueltos/2026-06-30_meta_leads_no_llegaban_crm.md`
+- Actualización de `docs/README_DOCS.md`
+
+**Resultado:** Integración Meta → CRM 100% funcional, 67 leads recuperados, proceso documentado
 
 ---
 
