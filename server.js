@@ -719,6 +719,129 @@ async function crearLeadCompleto({ name, email, phone, signals, message, uniform
 }
 
 //////////////////////////////////////////////////////
+// ✅ META LEAD CONTEXT STORE (v18 - handoff sin preguntas duplicadas)
+//////////////////////////////////////////////////////
+//
+// PROBLEMA QUE RESUELVE:
+// Los campos personalizados inyectados en SalesIQ con
+// $zoho.salesiq.visitor.info({...}) (p.ej. "kvn_meta") NO llegan de forma
+// confiable al handler Deluge del Zobot. Solo llegan los campos estandar
+// (name, email, phone). Por eso el mecanismo v17 (leer "kvn_meta" desde el
+// objeto visitor) nunca se disparaba y el bot caia al flujo generico v16,
+// re-preguntando todo.
+//
+// SOLUCION v18 (mediada por backend):
+//   1. El script de la landing  meta-lead-context.js  hace POST /meta-context
+//      con TODO el contexto de Meta (name, phone, email, sport, quantity,
+//      date, design, lead_id, campaign, lang).
+//   2. El backend lo guarda en memoria, indexado por TELEFONO normalizado y
+//      por NOMBRE normalizado (TTL ~24h).
+//   3. El handler Deluge, en cada mensaje, lee  visitor.get("name") /
+//      visitor.get("phone")  (campos estandar que SI llegan) y hace
+//      GET /meta-context?name=..&phone=..  para recuperar el contexto.
+//      Si lo encuentra -> saludo personalizado, sin formulario, lead unico.
+//
+// Es un Map en memoria del proceso Node (persistente en Render mientras el
+// servicio este vivo). Si el proceso reinicia se pierde, pero el lead de Meta
+// vuelve a entrar a la landing con sus parametros en la URL y se re-registra.
+//////////////////////////////////////////////////////
+
+const META_CONTEXT_TTL_MS = 24 * 60 * 60 * 1000; // 24 horas
+const metaContextStore = new Map(); // key -> { data, expiresAt }
+
+function normalizePhone(phone) {
+  if (!phone) return "";
+  // Solo digitos; nos quedamos con los ultimos 10 para tolerar prefijos de pais
+  const digits = ("" + phone).replace(/\D/g, "");
+  if (digits.length >= 10) return digits.slice(-10);
+  return digits;
+}
+
+function normalizeName(name) {
+  if (!name) return "";
+  return ("" + name)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // quitar acentos
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function metaStoreSet(data) {
+  const expiresAt = Date.now() + META_CONTEXT_TTL_MS;
+  const entry = { data, expiresAt };
+  const phoneKey = normalizePhone(data.phone);
+  const nameKey = normalizeName(data.name);
+  if (phoneKey) metaContextStore.set("p:" + phoneKey, entry);
+  if (nameKey) metaContextStore.set("n:" + nameKey, entry);
+  // Limpieza oportunista de entradas vencidas
+  const now = Date.now();
+  for (const [k, v] of metaContextStore) {
+    if (v.expiresAt < now) metaContextStore.delete(k);
+  }
+}
+
+function metaStoreGet({ phone, name }) {
+  const now = Date.now();
+  const phoneKey = normalizePhone(phone);
+  const nameKey = normalizeName(name);
+  let entry = null;
+  if (phoneKey && metaContextStore.has("p:" + phoneKey)) {
+    entry = metaContextStore.get("p:" + phoneKey);
+  } else if (nameKey && metaContextStore.has("n:" + nameKey)) {
+    entry = metaContextStore.get("n:" + nameKey);
+  }
+  if (!entry) return null;
+  if (entry.expiresAt < now) return null;
+  return entry.data;
+}
+
+// Guardar el contexto de un lead de Meta (lo llama la landing al cargar)
+app.post("/meta-context", (req, res) => {
+  try {
+    const b = req.body || {};
+    const data = {
+      name: b.name || "",
+      phone: b.phone || "",
+      email: b.email || "",
+      sport: b.sport || "",
+      quantity: b.quantity || "",
+      date: b.date || "",
+      design: b.design || "",
+      lead_id: b.lead_id || "",
+      campaign: b.campaign || "",
+      lang: b.lang || "es",
+      savedAt: new Date().toISOString()
+    };
+    if (!data.name && !data.phone) {
+      return res.json({ ok: false, error: "missing_name_and_phone" });
+    }
+    metaStoreSet(data);
+    console.log("📥 /meta-context guardado:", JSON.stringify(data));
+    return res.json({ ok: true });
+  } catch (err) {
+    console.log("🔥 /meta-context error:", err.message);
+    return res.json({ ok: false, error: err.message });
+  }
+});
+
+// Recuperar el contexto de un lead de Meta (lo llama el handler Deluge)
+app.get("/meta-context", (req, res) => {
+  try {
+    const phone = (req.query && req.query.phone) || "";
+    const name = (req.query && req.query.name) || "";
+    const data = metaStoreGet({ phone, name });
+    if (!data) {
+      return res.json({ ok: true, isMeta: false });
+    }
+    return res.json({ ok: true, isMeta: true, context: data });
+  } catch (err) {
+    console.log("🔥 GET /meta-context error:", err.message);
+    return res.json({ ok: false, isMeta: false, error: err.message });
+  }
+});
+
+//////////////////////////////////////////////////////
 // ✅ ENDPOINT /lead  (llamado por el Context Handler de SalesIQ)
 //////////////////////////////////////////////////////
 

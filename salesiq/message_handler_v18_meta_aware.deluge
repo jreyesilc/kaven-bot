@@ -1,0 +1,872 @@
+response = Map();
+input = message.get("text");
+inputText = "";
+if(input != null)
+{
+        inputText = "" + input;
+}
+
+// =========================================================================
+// MESSAGE HANDLER v18 - META AWARE (handoff mediado por backend)
+// =========================================================================
+// NOVEDAD v18 (sobre v17): Cambia EL CANAL por el que el handler descubre a
+// un lead de Meta. En v17 leiamos un campo personalizado "kvn_meta" desde el
+// objeto `visitor`, pero los campos personalizados de visitor.info() NO llegan
+// de forma confiable al handler Deluge del Zobot, asi que la deteccion nunca
+// se disparaba y el bot caia al flujo generico re-preguntando todo.
+//
+// COMO LLEGA AHORA LA INFORMACION DE META AL HANDLER (canal confiable):
+//   1. El script de la landing  meta-lead-context.js  captura los parametros
+//      de la URL (?source=meta&name=...&phone=...&sport=...&quantity=...&date=...&design=...)
+//      y ademas de inyectar los campos estandar al visitante, hace
+//      POST https://kaven-bot.onrender.com/meta-context  con TODO el contexto.
+//   2. El backend guarda ese contexto en memoria, indexado por TELEFONO y por
+//      NOMBRE normalizados (TTL 24h).
+//   3. Este handler lee los campos ESTANDAR del visitante  visitor.get("name")
+//      y  visitor.get("phone")  (que SI llegan a Deluge) y consulta
+//      GET /meta-context?name=..&phone=..  para recuperar el contexto.
+//      El resultado se guarda en la sesion del chat para no repetir la consulta.
+//
+// COMPORTAMIENTO PARA LEAD DE META:
+//   1. NO muestra el formulario de captura (context_handler) -> lead_captured=true.
+//   2. Saluda por su NOMBRE y reconoce lo que ya compartio en Meta.
+//   3. Va directo al catalogo interactivo (sin re-preguntar deporte/cantidad/etc).
+//   4. Crea el lead en el CRM una sola vez (backend /lead) con los datos de Meta.
+//   Para visitantes que NO vienen de Meta: flujo NORMAL identico a v16.
+//
+// CONSERVA: RAG, deteccion de senales inteligentes, idioma, boton de producto.
+// =========================================================================
+
+// ---------------------------------------------------------------
+// Productos del catalogo de ciclismo (botones "Get a quote")
+// ---------------------------------------------------------------
+allProducts = {"Standard Jersey","Elite Jersey","Premier Jersey","Standard Bib Short","Elite Bib Short","Premier Bib Short"};
+
+clickedProduct = "";
+if(inputText.indexOf("Quiero cotizar:") >= 0)
+{
+        clickedProduct = inputText.getSuffix("Quiero cotizar:").trim();
+        prodSess = Map();
+        prodSess.put("lead_clicked_product",clickedProduct);
+        zoho.salesiq.visitorsession.set("jreyesilcmx",prodSess);
+}
+
+// Estado de sesion
+captured = "false";
+sess = zoho.salesiq.visitorsession.get("jreyesilcmx","lead_captured");
+if(sess != null && sess.get("data") != null && sess.get("data").get("lead_captured") != null)
+{
+        captured = sess.get("data").get("lead_captured");
+}
+
+// =========================================================================
+// v18: DETECCION DE LEAD DE META  (mediada por backend - canal confiable)
+// =========================================================================
+portalName = "jreyesilcmx";
+
+// --- 1) Recuperar el payload ya guardado en sesion (mensajes previos del chat) ---
+//        Si ya lo recuperamos antes en este chat, NO volvemos a consultar el backend.
+metaRaw = "";
+msSess = zoho.salesiq.visitorsession.get(portalName,"meta_payload");
+if(msSess != null && msSess.get("data") != null && msSess.get("data").get("meta_payload") != null)
+{
+        metaRaw = "" + msSess.get("data").get("meta_payload");
+}
+
+// --- 2) Leer los campos ESTANDAR del visitante (estos SI llegan a Deluge) ---
+visName = "";
+visPhone = "";
+try 
+{
+        if(visitor != null)
+        {
+                if(visitor.get("name") != null)
+                {
+                        visName = "" + visitor.get("name");
+                }
+                if(visitor.get("phone") != null)
+                {
+                        visPhone = "" + visitor.get("phone");
+                }
+                else if(visitor.get("contactNumber") != null)
+                {
+                        visPhone = "" + visitor.get("contactNumber");
+                }
+                else if(visitor.get("contact_number") != null)
+                {
+                        visPhone = "" + visitor.get("contact_number");
+                }
+                else if(visitor.get("mobile") != null)
+                {
+                        visPhone = "" + visitor.get("mobile");
+                }
+        }
+}
+catch (eVis)
+{
+        visName = visName;
+}
+
+// --- 3) Si no hay payload en sesion, consultarlo al backend por nombre/telefono ---
+metaChecked = "false";
+mcSess = zoho.salesiq.visitorsession.get(portalName,"meta_checked");
+if(mcSess != null && mcSess.get("data") != null && mcSess.get("data").get("meta_checked") != null)
+{
+        metaChecked = mcSess.get("data").get("meta_checked");
+}
+
+if((metaRaw == null || metaRaw.indexOf("META") != 0) && (visName != "" || visPhone != ""))
+{
+        try 
+        {
+                mcParams = Map();
+                mcParams.put("name",visName);
+                mcParams.put("phone",visPhone);
+                mcResp = invokeurl
+                [
+                        url :"https://kaven-bot.onrender.com/meta-context"
+                        type :GET
+                        parameters:mcParams
+                ];
+                if(mcResp != null)
+                {
+                        mcMap = mcResp;
+                        isMetaVal = mcMap.get("isMeta");
+                        if(isMetaVal == true || isMetaVal == "true")
+                        {
+                                ctx = mcMap.get("context");
+                                if(ctx != null)
+                                {
+                                        cName = "";
+                                        cPhone = "";
+                                        cEmail = "";
+                                        cSport = "";
+                                        cQty = "";
+                                        cDate = "";
+                                        cDesign = "";
+                                        cLang = "es";
+                                        if(ctx.get("name") != null)
+                                        {
+                                                cName = "" + ctx.get("name");
+                                        }
+                                        if(ctx.get("phone") != null)
+                                        {
+                                                cPhone = "" + ctx.get("phone");
+                                        }
+                                        if(ctx.get("email") != null)
+                                        {
+                                                cEmail = "" + ctx.get("email");
+                                        }
+                                        if(ctx.get("sport") != null)
+                                        {
+                                                cSport = "" + ctx.get("sport");
+                                        }
+                                        if(ctx.get("quantity") != null)
+                                        {
+                                                cQty = "" + ctx.get("quantity");
+                                        }
+                                        if(ctx.get("date") != null)
+                                        {
+                                                cDate = "" + ctx.get("date");
+                                        }
+                                        if(ctx.get("design") != null)
+                                        {
+                                                cDesign = "" + ctx.get("design");
+                                        }
+                                        if(ctx.get("lang") != null && ctx.get("lang") != "")
+                                        {
+                                                cLang = "" + ctx.get("lang");
+                                        }
+                                        // Reconstruir el payload compacto que el resto del handler ya sabe parsear.
+                                        metaRaw = "META|name=" + cName + "|phone=" + cPhone + "|email=" + cEmail + "|sport=" + cSport + "|quantity=" + cQty + "|date=" + cDate + "|design=" + cDesign + "|lang=" + cLang;
+                                }
+                        }
+                }
+        }
+        catch (eMc)
+        {
+                // Si el backend falla, el chat continua con el flujo normal.
+                metaRaw = metaRaw;
+        }
+        // Marcar que ya consultamos (evita re-consultar en cada mensaje).
+        mcFlag = Map();
+        mcFlag.put("meta_checked","true");
+        zoho.salesiq.visitorsession.set(portalName,mcFlag);
+}
+
+// --- 4) Parsear el payload a campos individuales ---
+isMetaLead = false;
+metaName = "";
+metaPhone = "";
+metaEmail = "";
+metaSport = "";
+metaQty = "";
+metaDate = "";
+metaDesign = "";
+metaLang = "es";
+if(metaRaw != null && metaRaw.indexOf("META") == 0)
+{
+        isMetaLead = true;
+        parts = metaRaw.toList("|");
+        for each p in parts
+        {
+                if(p.indexOf("=") > 0)
+                {
+                        k = p.getPrefix("=");
+                        val = p.getSuffix("=");
+                        if(k == "name")
+                        {
+                                metaName = val;
+                        }
+                        if(k == "phone")
+                        {
+                                metaPhone = val;
+                        }
+                        if(k == "email")
+                        {
+                                metaEmail = val;
+                        }
+                        if(k == "sport")
+                        {
+                                metaSport = val;
+                        }
+                        if(k == "quantity")
+                        {
+                                metaQty = val;
+                        }
+                        if(k == "date")
+                        {
+                                metaDate = val;
+                        }
+                        if(k == "design")
+                        {
+                                metaDesign = val;
+                        }
+                        if(k == "lang" && val != "")
+                        {
+                                metaLang = val;
+                        }
+                }
+        }
+        // Persistir para recordar el contexto durante todo el chat.
+        metaSave = Map();
+        metaSave.put("meta_payload",metaRaw);
+        metaSave.put("meta_lead","true");
+        zoho.salesiq.visitorsession.set(portalName,metaSave);
+        // Un lead de Meta YA entrego sus datos: NUNCA mostramos el formulario.
+        captured = "true";
+}
+
+// --- 5) Estado: ¿ya saludamos a este lead de Meta? ---
+metaGreeted = "false";
+mgSess = zoho.salesiq.visitorsession.get(portalName,"meta_greeted");
+if(mgSess != null && mgSess.get("data") != null && mgSess.get("data").get("meta_greeted") != null)
+{
+        metaGreeted = mgSess.get("data").get("meta_greeted");
+}
+
+// =========================================================================
+// v17: SALUDO DETERMINISTA + ALTA DE LEAD (solo el PRIMER mensaje de Meta)
+// =========================================================================
+// En el primer turno respondemos con un saludo personalizado garantizado
+// (sin pasar por OpenAI), que reconoce sus datos de Meta y va directo al
+// catalogo. Asi NUNCA se repiten preguntas. Tambien creamos el lead en CRM.
+if(isMetaLead && metaGreeted != "true")
+{
+        // --- Alta de lead en el backend (una sola vez) ---
+        prodTxt = metaSport;
+        if(prodTxt == "")
+        {
+                prodTxt = "No especificado (lead de Meta)";
+        }
+        leadBody = Map();
+        leadBody.put("name",metaName);
+        leadBody.put("phone",metaPhone);
+        leadBody.put("products",prodTxt);
+        // Campos dedicados que el backend formatea en la Description del CRM.
+        if(metaQty != "")
+        {
+                leadBody.put("quantity",metaQty);
+        }
+        if(metaDate != "")
+        {
+                leadBody.put("deadline",metaDate);
+        }
+        if(metaDesign != "")
+        {
+                leadBody.put("design",metaDesign);
+        }
+        leadBody.put("message","Lead de Meta (handoff Instant Form -> landing). Datos pre-capturados, sin re-preguntar.");
+        leadBody.put("lead_source","Meta");
+        leadBody.put("debug_source","SalesIQ Message Handler v17 meta-aware");
+        leadHdr = Map();
+        leadHdr.put("Content-Type","application/json");
+        try 
+        {
+                leadResp = invokeurl
+                [
+                        url :"https://kaven-bot.onrender.com/lead"
+                        type :POST
+                        parameters:leadBody.toString()
+                        headers:leadHdr
+                ];
+        }
+        catch (eLead)
+        {
+                // Si fallara el alta, el chat continua igual; se revisa manual.
+        }
+
+        // --- Elegir el catalogo correcto segun el deporte ---
+        sportLow = metaSport.toLowerCase();
+        catalogUrl = "https://www.kavensports.com/cycling-catalog";
+        if(metaSport != "" && sportLow.indexOf("cicl") < 0 && sportLow.indexOf("cycl") < 0 && sportLow.indexOf("bike") < 0)
+        {
+                catalogUrl = "https://kavensports.com";
+        }
+
+        // --- Construir saludo personalizado (bilingue) ---
+        greetName = metaName;
+        metaReply = "";
+        if(metaLang == "en")
+        {
+                metaReply = "Hi " + greetName + "! 👋 I'm the Kaven Sports assistant. ";
+                if(metaSport != "")
+                {
+                        metaReply = metaReply + "I can see you already shared your info with us about " + metaSport + " — thank you so much! ";
+                }
+                else
+                {
+                        metaReply = metaReply + "I can see you already shared your info with us — thank you so much! ";
+                }
+                metaReply = metaReply + "No need to ask you anything again. 😊\n\n";
+                metaReply = metaReply + "Here's our interactive catalog so you can explore models, cuts and options: " + catalogUrl + "\n\n";
+                ackEn = "";
+                if(metaQty != "")
+                {
+                        ackEn = ackEn + "Since you mentioned around " + metaQty + " people, ";
+                }
+                if(metaDesign != "")
+                {
+                        ackEn = ackEn + "and that your design is \"" + metaDesign + "\", ";
+                }
+                if(metaDate != "")
+                {
+                        ackEn = ackEn + "with a target date of " + metaDate + ", ";
+                }
+                if(ackEn != "")
+                {
+                        metaReply = metaReply + ackEn + "I already have what I need to prepare your personalized quote.\n\n";
+                }
+                metaReply = metaReply + "What would you like to look at first, or how can I help you? ✨";
+        }
+        else
+        {
+                metaReply = "¡Hola " + greetName + "! 👋 Soy el asistente de Kaven Sports. ";
+                if(metaSport != "")
+                {
+                        metaReply = metaReply + "Vi que ya nos compartiste tu informacion para " + metaSport + " — ¡mil gracias! ";
+                }
+                else
+                {
+                        metaReply = metaReply + "Vi que ya nos compartiste tu informacion — ¡mil gracias! ";
+                }
+                metaReply = metaReply + "No necesito volver a preguntarte nada. 😊\n\n";
+                metaReply = metaReply + "Te comparto nuestro catalogo interactivo para que veas modelos, cortes y opciones: " + catalogUrl + "\n\n";
+                ackEs = "";
+                if(metaQty != "")
+                {
+                        ackEs = ackEs + "Como mencionaste alrededor de " + metaQty + " personas, ";
+                }
+                if(metaDesign != "")
+                {
+                        ackEs = ackEs + "y que tu diseno esta \"" + metaDesign + "\", ";
+                }
+                if(metaDate != "")
+                {
+                        ackEs = ackEs + "con fecha estimada para " + metaDate + ", ";
+                }
+                if(ackEs != "")
+                {
+                        metaReply = metaReply + ackEs + "ya tengo lo necesario para preparar tu cotizacion personalizada.\n\n";
+                }
+                metaReply = metaReply + "¿Que te gustaria revisar primero o en que te puedo ayudar? ✨";
+        }
+
+        // --- Marcar saludado + capturado para que NUNCA salga el formulario ---
+        metaFlags = Map();
+        metaFlags.put("meta_greeted","true");
+        metaFlags.put("lead_captured","true");
+        zoho.salesiq.visitorsession.set(portalName,metaFlags);
+
+        response.put("action","reply");
+        response.put("replies",{metaReply});
+        return response;
+}
+
+// =========================================================================
+// DETECCION DE SEnALES DE COMPRA (portado de detectBuyingSignals - nativo)
+// =========================================================================
+norm = inputText.toLowerCase();
+norm = norm.replaceAll("á","a",true);
+norm = norm.replaceAll("é","e",true);
+norm = norm.replaceAll("í","i",true);
+norm = norm.replaceAll("ó","o",true);
+norm = norm.replaceAll("ú","u",true);
+norm = norm.replaceAll("ñ","n",true);
+norm = norm.replaceAll("ü","u",true);
+norm = norm.replaceAll("\\s+"," ",false);
+norm = norm.trim();
+
+// NOTA: usamos contains() en lugar de regex matches(). En Deluge el escape
+// de \\b en matches() no funciona de forma confiable, por eso la deteccion
+// por palabras clave (contains) es mas robusta.
+signalCats = List();
+
+pricingKw = {"precio","price","pricing","per unit","per piece","cuanto cuesta","cuanto vale","costo","cuesta","cost","how much","quote","cotiz","budget","presupuesto"};
+for each kw in pricingKw
+{
+        if(norm.contains(kw) && !signalCats.contains("pricing"))
+        {
+                signalCats.add("pricing");
+        }
+}
+
+quantityKw = {"cuantos","cantidad","minimum order","minimo de pedido","minimo de compra","pedido minimo","moq","how many","units","unidad","piezas","pieza","bulk","dozen","docena","mayoreo"};
+for each kw in quantityKw
+{
+        if(norm.contains(kw) && !signalCats.contains("quantity"))
+        {
+                signalCats.add("quantity");
+        }
+}
+// Cantidad por numero + producto (ej: "30 jerseys", "20 uniformes")
+if(!signalCats.contains("quantity"))
+{
+        hasDigit = false;
+        digits = {"0","1","2","3","4","5","6","7","8","9"};
+        for each d in digits
+        {
+                if(norm.contains(d))
+                {
+                        hasDigit = true;
+                }
+        }
+        if(hasDigit)
+        {
+                prodWords = {"uniform","jersey","shirt","camiseta","playera","kit","set","player","jugador","team","equipo","pieza","piece","unit","unidad","short","hoodie","sudadera"};
+                for each pw in prodWords
+                {
+                        if(norm.contains(pw) && !signalCats.contains("quantity"))
+                        {
+                                signalCats.add("quantity");
+                        }
+                }
+        }
+}
+
+customKw = {"diseno","personaliz","customize","customise","custom","logo","color","sublimad","nombre en el uniforme"};
+for each kw in customKw
+{
+        if(norm.contains(kw) && !signalCats.contains("customization"))
+        {
+                signalCats.add("customization");
+        }
+}
+
+timelineKw = {"cuanto tiempo","cuanto tarda","entrega","delivery","lead time","tiempo de produccion","when do","when can","how soon","how long","plazo","tarda"};
+for each kw in timelineKw
+{
+        if(norm.contains(kw) && !signalCats.contains("timeline"))
+        {
+                signalCats.add("timeline");
+        }
+}
+
+interestKw = {"quiero cotizar","me interesa","i am interested","i'm interested","im interested","want a quote","how to order","como ordeno","como ordenar","quiero comprar","quiero ordenar","listo para comprar","want to order","place an order","ready to order"};
+for each kw in interestKw
+{
+        if(norm.contains(kw) && !signalCats.contains("direct_interest"))
+        {
+                signalCats.add("direct_interest");
+        }
+}
+
+// =========================================================================
+// v16: LOGICA DE DOS NIVELES (pregunta vs solicitud)
+// =========================================================================
+// Detectamos si el mensaje es una PREGUNTA informativa o una SOLICITUD directa.
+// PREGUNTAS (que, como, tienen, hay, cual, when, what, do you) → responder con RAG primero
+// SOLICITUDES (quiero, necesito, me interesa, click boton) → formulario inmediato
+isQuestion = false;
+questionWords = {"que ","como ","tienen ","hay ","cual ","cuales ","cuando ","donde ","por que ","what ","how ","do you ","does ","when ","where ","why ","can you ","is it ","are "};
+for each qw in questionWords
+{
+        if(norm.contains(qw))
+        {
+                isQuestion = true;
+        }
+}
+
+// Si el mensaje es una PREGUNTA y NO tiene direct_interest, solo RESPONDER (no formulario aun)
+// Si tiene direct_interest O click de boton, formulario inmediato
+collectContact = "false";
+if(signalCats.contains("direct_interest"))
+{
+        collectContact = "true";
+}
+else if(signalCats.size() > 0 && !isQuestion)
+{
+        // Tiene senales (precio, cantidad, etc.) pero NO es pregunta → formulario
+        collectContact = "true";
+}
+// Si isQuestion=true y NO tiene direct_interest, collectContact queda "false" → responde primero
+
+// Guardar senales en sesion para el Context Handler (creacion de lead)
+sigSess = Map();
+sigSess.put("lead_signals",signalCats.toString());
+zoho.salesiq.visitorsession.set("jreyesilcmx",sigSess);
+
+// =========================================================================
+// DETECCION / PERSISTENCIA DE IDIOMA (en/es)
+// El boton de producto envia texto en espanol ("Quiero cotizar:"), por eso
+// ese mensaje NO debe cambiar el idioma del visitante. Solo el texto libre
+// real define el idioma. Por defecto ingles (el saludo del sitio es ingles).
+// =========================================================================
+prevLang = "en";
+langSess = zoho.salesiq.visitorsession.get("jreyesilcmx","lead_lang");
+if(langSess != null && langSess.get("data") != null && langSess.get("data").get("lead_lang") != null)
+{
+        prevLang = langSess.get("data").get("lead_lang");
+}
+curLang = prevLang;
+if(clickedProduct == "")
+{
+        esHit = false;
+        esKw = {"hola","buenas","gracias","quiero","necesito","cuanto","cuantos","cuesta","precio","cotiz","uniforme","equipo","playera","camiseta","diseno","colores","entrega","pedido","ayuda","gustaria","entonces","tienen","entrega"};
+        for each kw in esKw
+        {
+                if(norm.contains(kw))
+                {
+                        esHit = true;
+                }
+        }
+        enHit = false;
+        enKw = {"hi ","hello","hey","thanks","thank you","want","need","how much","how many","price","quote","jersey","team","please","custom","order","delivery","design","help","the ","you "};
+        for each kw in enKw
+        {
+                if(norm.contains(kw))
+                {
+                        enHit = true;
+                }
+        }
+        if(esHit)
+        {
+                curLang = "es";
+        }
+        else if(enHit)
+        {
+                curLang = "en";
+        }
+}
+langStore = Map();
+langStore.put("lead_lang",curLang);
+zoho.salesiq.visitorsession.set("jreyesilcmx",langStore);
+
+// =========================================================================
+// LLAMADA A OPENAI (NATIVA - invokeurl + Connection segura)
+// =========================================================================
+systemPrompt = "";
+systemPrompt = systemPrompt + "You are the sales assistant for Kaven Sports, an expert in custom sports uniforms. Kaven Sports (formerly known as Kings Sportswear) is a San Diego, USA based manufacturer of premium, fully sublimated custom athletic apparel for teams of every size.\n";
+systemPrompt = systemPrompt + "\n";
+systemPrompt = systemPrompt + "ABOUT KAVEN SPORTS\n";
+systemPrompt = systemPrompt + "- We design and manufacture 100% custom sports uniforms and team apparel in San Diego, USA.\n";
+systemPrompt = systemPrompt + "- We use advanced full sublimation so colors stay vibrant and fade-resistant through heavy use and frequent washing.\n";
+systemPrompt = systemPrompt + "- Our fabrics feature Dryfit technology, antibacterial properties, and UV protection, so athletes stay comfortable, cool, and fresh.\n";
+systemPrompt = systemPrompt + "- Our promise: full customization, professional quality, and expert guidance from real designers.\n";
+systemPrompt = systemPrompt + "\n";
+systemPrompt = systemPrompt + "PRODUCTS & SPORTS WE COVER\n";
+systemPrompt = systemPrompt + "- Sport uniforms: baseball, softball, basketball, soccer, football, volleyball, track & field, padel, cycling, and off-road/racing.\n";
+systemPrompt = systemPrompt + "- Custom team apparel: jerseys, pants, shorts, hoodies, parkas, tracksuits, polos, socks, buffs, and bags.\n";
+systemPrompt = systemPrompt + "- Promotional gear: custom tents, flags, and table covers.\n";
+systemPrompt = systemPrompt + "\n";
+systemPrompt = systemPrompt + "VERY IMPORTANT — TIERS ONLY APPLY TO CYCLING:\n";
+systemPrompt = systemPrompt + "The Standard / Elite / Premier tier system EXISTS ONLY FOR CYCLING. For every OTHER sport (soccer, baseball, softball, basketball, football, volleyball, track & field, padel, etc.) we manufacture a SINGLE premium quality level — there are NO Standard/Elite/Premier tiers. NEVER mention cycling tiers, the cycling kit (Jersey + Bibshort), or the cycling catalog unless the customer is specifically asking about CYCLING. If a customer asks about soccer or any non-cycling sport, talk ONLY about that sport's products. Do not redirect them to cycling.\n";
+systemPrompt = systemPrompt + "\n";
+systemPrompt = systemPrompt + "SOCCER (FUTBOL) PRODUCT LINE\n";
+systemPrompt = systemPrompt + "For soccer we offer a single premium, 100% sublimated quality (Dryfit, antibacterial, UV protection). Available items:\n";
+systemPrompt = systemPrompt + "- Jersey (with a choice of CREW NECK 'cuello redondo' or V-NECK 'cuello V').\n";
+systemPrompt = systemPrompt + "- Shorts.\n";
+systemPrompt = systemPrompt + "- Socks (medias).\n";
+systemPrompt = systemPrompt + "- Full kit (jersey + shorts + socks), fully customized.\n";
+systemPrompt = systemPrompt + "There is only one quality level for soccer; the only style choice on the jersey is the neck type (crew or V). All designs, colors, names, numbers and logos are 100% custom and free.\n";
+systemPrompt = systemPrompt + "\n";
+systemPrompt = systemPrompt + "OTHER TEAM SPORTS (baseball, softball, basketball, football, volleyball, track & field, padel, etc.)\n";
+systemPrompt = systemPrompt + "Single premium quality, 100% sublimated, fully custom. Typical items per sport include jerseys, shorts/pants, and matching accessories. We do NOT yet have a printed catalog for these sports, so describe the available items conversationally and offer a personalized quote. Do not invent tiers, prices, or catalog links for these sports.\n";
+systemPrompt = systemPrompt + "\n";
+systemPrompt = systemPrompt + "CYCLING PRODUCT LINE (3 tiers — ONLY for cycling)\n";
+systemPrompt = systemPrompt + "ONLY when the customer asks about cycling: we offer three cycling tiers, all 100% sublimated and built with Dryfit, antibacterial, and UV-protection fabrics. The difference is the level of technical development, aerodynamic fit, and construction complexity:\n";
+systemPrompt = systemPrompt + "- STANDARD: Excellent balance of comfort and durability. Ideal for regular training and recreational riders.\n";
+systemPrompt = systemPrompt + "- ELITE: Optimized body fit and improved breathability. Built for superior performance on more demanding rides.\n";
+systemPrompt = systemPrompt + "- PREMIERE: Our top tier, with advanced aerodynamic engineering and ultra-light materials. Designed for high-level competition.\n";
+systemPrompt = systemPrompt + "- A standard cycling kit includes a Jersey + Bibshort, fully customized.\n";
+systemPrompt = systemPrompt + "- For detailed cuts and options, you can share our cycling catalog: https://www.kavensports.com/files/info/Catalogo_Ciclismo.pdf\n";
+systemPrompt = systemPrompt + "\n";
+systemPrompt = systemPrompt + "KEY SELLING POINTS (mention naturally when relevant)\n";
+systemPrompt = systemPrompt + "- No minimum order — perfect for a single player, a sample piece, or a full organization.\n";
+systemPrompt = systemPrompt + "- Unlimited FREE custom designs with expert designers — we can work from the customer's own design or create one for them.\n";
+systemPrompt = systemPrompt + "- Fast production: typically delivered in about 1-3 weeks (design + shipping included).\n";
+systemPrompt = systemPrompt + "- Proudly made in San Diego, USA.\n";
+systemPrompt = systemPrompt + "- 100% satisfaction guarantee.\n";
+systemPrompt = systemPrompt + "\n";
+systemPrompt = systemPrompt + "YOUR ROLE & GOALS\n";
+systemPrompt = systemPrompt + "- Help teams, coaches, and players find the perfect custom uniforms for their sport.\n";
+systemPrompt = systemPrompt + "- Understand their needs (sport, quantity, colors, logos, timeline, design status) and recommend the right products or cycling tier.\n";
+systemPrompt = systemPrompt + "- Qualify leads: when a visitor shows buying intent (asks about pricing, quantity, customization/logos, delivery timeline, or says they want to order), guide them toward sharing their contact details (full name, phone, email) so our team can prepare a personalized quote.\n";
+systemPrompt = systemPrompt + "- Be genuinely helpful first — build rapport, answer questions, and make the customer feel confident about ordering custom gear.\n";
+systemPrompt = systemPrompt + "\n";
+systemPrompt = systemPrompt + "TONE & STYLE (modeled on our best human + AI conversations)\n";
+systemPrompt = systemPrompt + "- Warm, friendly, and enthusiastic — like a knowledgeable teammate, never a pushy salesperson.\n";
+systemPrompt = systemPrompt + "- Address the customer by name whenever you know it.\n";
+systemPrompt = systemPrompt + "- Validate the customer often: \"Great question!\", \"That's an excellent idea!\", \"Love that design!\".\n";
+systemPrompt = systemPrompt + "- Be concise but informative — get to the point while staying warm.\n";
+systemPrompt = systemPrompt + "- Use light, tasteful emojis only when they add energy (e.g., 😊 ✨ 🚴) — at most one per message, never overdo it.\n";
+systemPrompt = systemPrompt + "- End most replies with an open question that moves the conversation forward.\n";
+systemPrompt = systemPrompt + "- When a customer shares their own design, acknowledge it positively and personally before continuing.\n";
+systemPrompt = systemPrompt + "- For sample or single-piece requests (e.g., one kit before a group order), respond positively — it's a great way for a team to check quality first-hand.\n";
+systemPrompt = systemPrompt + "\n";
+systemPrompt = systemPrompt + "FIRST REPLY AFTER A LEAD / FORM SUBMISSION (welcome message)\n";
+systemPrompt = systemPrompt + "When a visitor arrives having just submitted a form or shared their details (name, sport, quantity, design status, etc.), open the relationship with a warm, structured welcome. Follow this proven flow:\n";
+systemPrompt = systemPrompt + "1. Greet them by name and thank them genuinely for sharing their details and their interest, mentioning the specific sport they care about (e.g. \"tu interés en nuestros uniformes de ciclismo\").\n";
+systemPrompt = systemPrompt + "2. Give a short, confident intro about Kaven Sports: high-quality custom uniforms, Dryfit antibacterial fabric with UV protection (comfortable and professional), and the fact that we work with NO minimum order so they have total freedom to outfit a whole team or just themselves.\n";
+systemPrompt = systemPrompt + "3. State the approximate delivery time (about 1-3 weeks, including custom design and shipping). IMPORTANT: reference the data they already gave you to feel personal and move faster — for example, if they said \"ya tengo el diseño\", say something like \"Como ya cuentas con tu diseño, podemos avanzar más rápido\"; if they gave a quantity or a date, acknowledge it.\n";
+systemPrompt = systemPrompt + "4. Close with a single open, low-pressure question that invites them to continue (e.g. \"¿Qué más te gustaría saber o en qué otra cosa te puedo ayudar por ahora? ✨\").\n";
+systemPrompt = systemPrompt + "Keep it warm and easy to read (2-4 short paragraphs), one tasteful emoji at most per paragraph.\n";
+systemPrompt = systemPrompt + "\n";
+systemPrompt = systemPrompt + "FOLLOW-UP & LEAD NURTURING (the most important behavior — model this tone exactly)\n";
+systemPrompt = systemPrompt + "You are a patient, attentive follow-up assistant. NEVER pressure the customer. Always make them feel that you are calmly available on their schedule. Mirror these real, successful behaviors:\n";
+systemPrompt = systemPrompt + "- If the customer says they have to step away, got busy, or left unexpectedly (e.g. \"salí de imprevisto\"): reassure them warmly — \"¡Hola, Eligio! No te preocupes, entiendo perfectamente. Aquí sigo para cuando estés listo. 😊\" Then gently offer a helpful next step relevant to THEIR sport, such as helping them define the items they need (for soccer: jersey neck style, shorts, socks, or full kit; for cycling: the right tier) so you can prepare a more precise quote, OR ask if there's any other doubt you can help with.\n";
+systemPrompt = systemPrompt + "- If the customer wants to postpone or continue later (e.g. \"mañana le damos seguimiento\"): agree graciously with zero pressure — \"¡Claro que sí, Eligio! Entendido perfectamente. Aquí estaré pendiente para cuando estés listo mañana para continuar. ¡Que tengas una excelente tarde y nos leemos pronto! 😊\"\n";
+systemPrompt = systemPrompt + "- When the customer thanks you or says goodbye (e.g. \"Gracias, buena tarde\"): warmly thank them back, wish them well, and confirm you'll be available whenever they want to resume — \"¡Gracias a ti, Eligio! Que tengas una excelente tarde. Aquí estaré pendiente para cuando gustes retomar el tema. ¡Hasta pronto! 😊\"\n";
+systemPrompt = systemPrompt + "- Always address the customer by name, validate what they said, and keep your replies short and human in these moments.\n";
+systemPrompt = systemPrompt + "- When the moment is right and the customer is engaged, gently move the lead forward by offering to help define their order (the right items/options for their sport, or the right cycling tier if it IS cycling) or to prepare a personalized quote — but only as a helpful suggestion, never as a push.\n";
+systemPrompt = systemPrompt + "- Respect the customer's pace above all: a warm, patient, \"I'm here whenever you're ready\" attitude is what wins the sale.\n";
+systemPrompt = systemPrompt + "\n";
+systemPrompt = systemPrompt + "These follow-up examples are in Spanish because that's the customer's language; when the customer writes in English, deliver the exact same warm, patient, no-pressure tone in natural English.\n";
+systemPrompt = systemPrompt + "\n";
+systemPrompt = systemPrompt + "LANGUAGE\n";
+systemPrompt = systemPrompt + "- Bilingual: always reply in the SAME language the user writes in (English or Spanish). Match their tone and wording naturally.\n";
+systemPrompt = systemPrompt + "\n";
+systemPrompt = systemPrompt + "CYCLING LANDING – PRODUCT QUOTE FLOW (botones \"Get a quote\")\n";
+systemPrompt = systemPrompt + "On our cycling catalog page, each product has a \"Get a quote\" button that opens THIS chat with a first message like \"Quiero cotizar: <product>\" (e.g. \"Quiero cotizar: Elite Jersey\"). The six products are: Standard Jersey, Elite Jersey, Premier Jersey, Standard Bib Short, Elite Bib Short, Premier Bib Short. When you receive such a message:\n";
+systemPrompt = systemPrompt + "1. Acknowledge the SPECIFIC product they clicked by name, warmly (e.g. \"¡Excelente elección! El Elite Jersey es uno de nuestros favoritos 🚴\").\n";
+systemPrompt = systemPrompt + "2. Ask if they would like to ADD another product to their formal quote (e.g. \"¿Te gustaría agregar algún otro producto a tu cotización formal? Por ejemplo un bib short a juego, o varios modelos. Si solo quieres este, dímelo y seguimos.\").\n";
+systemPrompt = systemPrompt + "3. After they confirm which products they want (one or several), continue with the standard qualifying questionnaire to prepare the formal quote: for how many people is the order, by when they need the uniforms, and whether they already have a design or need help. Then collect their email, full name and phone so the team can send the personalized quote.\n";
+systemPrompt = systemPrompt + "Note: normally a structured form handles steps 2-3 automatically; only run this conversationally if the structured form is not shown. Always keep the exact product name(s) the customer mentioned so they appear in the quote.\n";
+systemPrompt = systemPrompt + "\n";
+systemPrompt = systemPrompt + "LEARNINGS FROM REAL CUSTOMER CONVERSATIONS (apply these patterns — they reflect how our best chats convert)\n";
+systemPrompt = systemPrompt + "1. \"CATALOG vs CUSTOM\" QUESTION: Customers very often ask something like \"¿tienen catálogo / modelos ya hechos, o todo es personalizado?\" (\"do you have a ready catalog or is everything custom?\"). Answer warmly that EVERYTHING is 100% custom-made to order — there is no pre-made stock. Explain this is our strength: they choose colors, design, names, numbers and logos with no extra cost. For cycling you can share the catalog link as a STYLE/CUT reference (not as ready-made stock). Never make them feel that \"custom\" is a limitation — frame it as total freedom. After answering, include a gentle, natural follow-up question to move the conversation forward (e.g. \"¿Para qué deporte lo necesitas?\" or \"¿Ya tienes un diseño en mente o te ayudamos a crearlo?\").\n";
+systemPrompt = systemPrompt + "2. SINGLE-PIECE & SAMPLE ORDERS ARE COMMON: Many real customers order just ONE piece (e.g. a single jersey) before committing to a team order. Always react positively and reassure them there is NO minimum order, so a single custom piece is perfectly fine — it's a great way to check our quality first-hand.\n";
+systemPrompt = systemPrompt + "3. MOST CUSTOMERS NEED DESIGN HELP: In the lead forms the most common answer is \"necesito ayuda para crearlo\" (they need help creating the design). Proactively offer our FREE professional design service and make it feel easy and exciting. Distinguish clearly between a DESIGN (the full look/layout of the uniform) and a LOGO (just their team or sponsor mark): if it's unclear, gently ask whether they already have a finished design, only a logo, or need us to create everything from scratch. This avoids confusion seen in past chats.\n";
+systemPrompt = systemPrompt + "4. TYPICAL CYCLING LEAD PROFILE: Most cycling leads are small groups (1–5 people) who need uniforms within the next few weeks and need design help. When a customer is unsure which cycling option fits, explain the three tiers consultatively (Standard / Elite / Premiere) and OFFER to help them pick the best one for their use (training vs competition) before preparing the quote — do not just dump information.\n";
+systemPrompt = systemPrompt + "5. RE-ENGAGEMENT AFTER SILENCE (often while waiting for a design): If a customer went quiet after we promised a design or quote, reconnect warmly with zero pressure: briefly apologize for any delay, confirm we're still here for them, and offer a concrete next step to resume (finish the design, pick options, or send the quote). Example: \"¡Hola, [nombre]! Una disculpa por la demora. Aquí seguimos para ayudarte a terminar tu diseño y avanzar con tu cotización cuando gustes. 😊\"\n";
+systemPrompt = systemPrompt + "6. LOCATION BY LANGUAGE: If a customer asks where we are located, answer based on the conversation language. For SPANISH conversations: mention presence in Baja California and Ciudad de Mexico. For ENGLISH conversations: mention San Diego. NEVER give an exact street address, number or postal code in any language — if they need logistics details, offer to coordinate through the formal quote or team member.\n";
+systemPrompt = systemPrompt + "\n";
+systemPrompt = systemPrompt + "GUIDELINES\n";
+systemPrompt = systemPrompt + "- For exact pricing, gather the customer's needs (tier, quantity, design details) and offer a personalized formal quote from the team, since final cost depends on the selected tier and specific design.\n";
+systemPrompt = systemPrompt + "- If you don't know a specific detail, offer to connect them with the Kaven Sports team rather than guessing.\n";
+systemPrompt = systemPrompt + "- Never reference the old \"Kings Sportswear\" name unless the customer brings it up; lead with \"Kaven Sports\".\n";
+systemPrompt = systemPrompt + "- Keep the conversation focused on helping them get the best custom uniforms for their team.\n";
+
+// =========================================================================
+// v17: CONTEXTO DE LEAD DE META (inyectado para turnos posteriores al saludo)
+// Le decimos al modelo lo que el cliente YA respondio en Meta para que NO
+// vuelva a preguntarlo. Solo aplica cuando el visitante viene de Meta.
+// =========================================================================
+if(isMetaLead)
+{
+        systemPrompt = systemPrompt + "\n";
+        systemPrompt = systemPrompt + "IMPORTANT — RETURNING META LEAD (DO NOT RE-ASK):\n";
+        systemPrompt = systemPrompt + "This visitor already completed our Meta (Facebook/Instagram) lead form and shared the details below. NEVER ask again for their name, phone, sport, quantity, delivery date, or design status. Greet them by name and continue helping based on what you already know. Move them toward a personalized quote.\n";
+        if(metaName != "")
+        {
+                systemPrompt = systemPrompt + "- Name: " + metaName + "\n";
+        }
+        if(metaPhone != "")
+        {
+                systemPrompt = systemPrompt + "- Phone: " + metaPhone + "\n";
+        }
+        if(metaSport != "")
+        {
+                systemPrompt = systemPrompt + "- Sport / uniform type: " + metaSport + "\n";
+        }
+        if(metaQty != "")
+        {
+                systemPrompt = systemPrompt + "- Quantity (people): " + metaQty + "\n";
+        }
+        if(metaDate != "")
+        {
+                systemPrompt = systemPrompt + "- Delivery date needed: " + metaDate + "\n";
+        }
+        if(metaDesign != "")
+        {
+                systemPrompt = systemPrompt + "- Design status: " + metaDesign + "\n";
+        }
+}
+
+// =========================================================================
+// ✅ RAG — RECUPERACION DE EJEMPLOS REALES (v15)
+// Antes de llamar a OpenAI, pedimos al backend los ejemplos mas parecidos
+// de conversaciones reales exitosas y los inyectamos en el prompt.
+// =========================================================================
+ragContext = "";
+try
+{
+        ragBody = Map();
+        ragBody.put("message",inputText);
+        ragResp = invokeurl
+        [
+                url :"https://kaven-bot.onrender.com/rag/context"
+                type :POST
+                parameters:ragBody.toString()
+                headers:{"Content-Type":"application/json"}
+        ];
+        // invokeurl con respuesta JSON ya viene como Map en Deluge.
+        // Lo usamos directo; si fuera texto, el catch deja ragContext vacio (fallback).
+        if(ragResp != null)
+        {
+                ragMap = ragResp;
+                if(ragMap.get("context") != null)
+                {
+                        ragContext = ragMap.get("context");
+                }
+        }
+}
+catch (e)
+{
+        // Si el RAG falla por cualquier razon, el bot sigue normal sin ejemplos.
+        ragContext = "";
+}
+// Inyectar los ejemplos recuperados al final del system prompt
+if(ragContext != null && ragContext != "")
+{
+        systemPrompt = systemPrompt + ragContext;
+}
+
+// =========================================================================
+// LLAMADA A OPENAI (identico a v14, pero systemPrompt ya incluye RAG)
+// =========================================================================
+msgs = List();
+sysMsg = Map();
+sysMsg.put("role","system");
+sysMsg.put("content",systemPrompt);
+msgs.add(sysMsg);
+usrMsg = Map();
+usrMsg.put("role","user");
+usrMsg.put("content",inputText);
+msgs.add(usrMsg);
+
+bodyMap = Map();
+bodyMap.put("model","gpt-4.1-mini");
+bodyMap.put("temperature",0.7);
+bodyMap.put("messages",msgs);
+
+hdr = Map();
+hdr.put("Content-Type","application/json");
+
+reply = "";
+try
+{
+        aiResp = invokeurl
+        [
+                url :"https://api.openai.com/v1/chat/completions"
+                type :POST
+                parameters:bodyMap.toString()
+                headers:hdr
+                connection:"openai_kaven"
+        ];
+        aiMap = aiResp.toMap();
+        choices = aiMap.get("choices");
+        if(choices != null && choices.size() > 0)
+        {
+                firstChoice = choices.get(0);
+                msgObj = firstChoice.get("message");
+                if(msgObj != null)
+                {
+                        reply = msgObj.get("content");
+                }
+        }
+}
+catch (e)
+{
+        reply = "";
+}
+if(reply == null || reply == "")
+{
+        if(curLang == "es")
+        {
+                reply = "Gracias por escribir a Kaven Sports. Cuentame que deporte y cuantos uniformes necesitas y con gusto te ayudo con una cotizacion.";
+        }
+        else
+        {
+                reply = "Thanks for reaching out to Kaven Sports! Tell me which sport and how many uniforms you need, and I'll gladly help you with a quote.";
+        }
+}
+reply = reply + "\n\n👉 https://kavensports.com";
+
+// Si el visitante hizo clic en un boton de producto, forzar captura
+if(clickedProduct != "")
+{
+        collectContact = "true";
+}
+
+// =========================================================================
+// FORMULARIO CORTO (identico a v13)
+// =========================================================================
+if(captured != "true" && collectContact == "true")
+{
+        response.put("action","context");
+        response.put("context_id","lead_details");
+        questions = Collection();
+        if(curLang == "es")
+        {
+                q0 = {"name":"phone","replies":{{"text":"Perfecto! Para enviarte la cotizacion por WhatsApp, cual es tu numero?","field_name":"siq_phone"}},"input":{"type":"tel","placeholder":"+52 664 123 4567","error":{"Ingresa un numero valido"}}};
+                questions.insert(q0);
+                q1 = {"name":"name","replies":{{"text":"Gracias! Y tu nombre es...?","field_name":"siq_name"}},"input":{"type":"name","placeholder":"Tu nombre completo"}};
+                questions.insert(q1);
+                if(clickedProduct == "" || !allProducts.contains(clickedProduct))
+                {
+                        prodOptions = List();
+                        for each p in allProducts
+                        {
+                                prodOptions.add(p);
+                        }
+                        prodOptions.add("Aun no estoy seguro");
+                        q2 = {"name":"products","replies":{{"text":"Que producto te interesa cotizar? (puedes elegir uno o varios)"}},"input":{"type":"multiple-select","options":prodOptions,"min_selection":"1"}};
+                        questions.insert(q2);
+                }
+        }
+        else
+        {
+                q0 = {"name":"phone","replies":{{"text":"Great! To send your quote via WhatsApp, what's your phone number?","field_name":"siq_phone"}},"input":{"type":"tel","placeholder":"+1 619 123 4567","error":{"Please enter a valid number"}}};
+                questions.insert(q0);
+                q1 = {"name":"name","replies":{{"text":"Thanks! And your name is...?","field_name":"siq_name"}},"input":{"type":"name","placeholder":"Your full name"}};
+                questions.insert(q1);
+                if(clickedProduct == "" || !allProducts.contains(clickedProduct))
+                {
+                        prodOptions = List();
+                        for each p in allProducts
+                        {
+                                prodOptions.add(p);
+                        }
+                        prodOptions.add("Not sure yet");
+                        q2 = {"name":"products","replies":{{"text":"Which product would you like a quote for? (you can pick one or more)"}},"input":{"type":"multiple-select","options":prodOptions,"min_selection":"1"}};
+                        questions.insert(q2);
+                }
+        }
+        response.put("questions",questions);
+        return response;
+}
+
+response.put("action","reply");
+response.put("replies",{reply});
+return response;

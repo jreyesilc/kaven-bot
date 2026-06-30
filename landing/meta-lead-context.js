@@ -40,6 +40,10 @@
   var MAX_LEN = 120;                       // longitud maxima por campo (sanitizacion)
   var ZOHO_WAIT_MS = 500;                  // intervalo de polling para $zoho.salesiq
   var ZOHO_MAX_TRIES = 40;                 // ~20s esperando a que cargue SalesIQ
+  // Backend que respalda el handoff (v18): el handler Deluge consulta aqui el
+  // contexto de Meta por nombre/telefono, porque los campos personalizados de
+  // visitor.info() NO llegan de forma confiable a Deluge.
+  var BACKEND_URL = "https://kaven-bot.onrender.com";
 
   function log() {
     if (PORTAL_DEBUG && window.console) {
@@ -266,6 +270,52 @@
   }
 
   // ---------------------------------------------------------------------------
+  // 3.b) RESPALDO POR BACKEND  (canal confiable hacia el handler Deluge)
+  // ---------------------------------------------------------------------------
+  // Los campos personalizados de visitor.info() (p.ej. "kvn_meta") NO llegan
+  // de forma confiable al handler Deluge del Zobot. SI llegan los estandar
+  // (name/phone). Por eso enviamos TODO el contexto al backend, indexado por
+  // nombre y telefono; el handler luego lo recupera con esos campos estandar.
+  function postToBackend(data) {
+    try {
+      var payload = JSON.stringify({
+        name: data.name || "",
+        phone: data.phone || "",
+        email: data.email || "",
+        sport: data.sport || "",
+        quantity: data.quantity || "",
+        date: data.date || "",
+        design: data.design || "",
+        lead_id: data.lead_id || "",
+        campaign: data.campaign || "",
+        lang: data.lang || "es"
+      });
+      // fetch con keepalive: sobrevive aunque el usuario navegue de inmediato.
+      if (window.fetch) {
+        window.fetch(BACKEND_URL + "/meta-context", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payload,
+          keepalive: true,
+          mode: "cors"
+        }).then(function () {
+          log("Contexto Meta enviado al backend");
+        }).catch(function (e) {
+          log("Error enviando contexto al backend (fetch)", e);
+        });
+      } else {
+        // Respaldo para navegadores muy antiguos.
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", BACKEND_URL + "/meta-context", true);
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.send(payload);
+      }
+    } catch (e) {
+      log("Error enviando contexto al backend", e);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // 4) API GLOBAL  (window.KavenMetaLead)
   // ---------------------------------------------------------------------------
   function buildGlobalApi(data) {
@@ -320,6 +370,9 @@
     // Inyectar a SalesIQ solo si hay contexto de Meta.
     if (finalData) {
       injectWhenReady(finalData);
+      // Canal confiable (v18): registrar el contexto en el backend para que
+      // el handler Deluge lo recupere por nombre/telefono.
+      postToBackend(finalData);
     }
   }
 
